@@ -1008,7 +1008,7 @@ def _resolve_scan_identity(conn, hw_uid):
 
     prep = conn.execute(
         '''SELECT id, card_uid, google_id FROM scan_prep_sessions
-           WHERE status = 'waiting' AND expires_at >= datetime('now')
+           WHERE status = 'waiting' AND expires_at >= datetime('now', 'localtime')
            ORDER BY created_at ASC LIMIT 1'''
     ).fetchone()
     if prep:
@@ -1080,7 +1080,7 @@ def get_google_user_from_token(conn, auth_header):
         '''SELECT g.google_id, g.email, g.display_name, g.card_uid
            FROM mobile_sessions s
            JOIN google_users g ON g.google_id = s.google_id
-           WHERE s.token = ? AND s.expires_at >= datetime('now')''',
+           WHERE s.token = ? AND s.expires_at >= datetime('now', 'localtime')''',
         (token,),
     ).fetchone()
     return row

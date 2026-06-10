@@ -1,4 +1,4 @@
-#Wed Jun 10 20:01:11 EEST 2026
+#Wed Jun 10 20:39:01 EEST 2026
 base.0=/home/valera/rfid-scanner-main/android-app/app/build/intermediates/dex/debug/mergeExtDexDebug/classes.dex
 base.1=/home/valera/rfid-scanner-main/android-app/app/build/intermediates/dex/debug/mergeProjectDexDebug/0/classes.dex
 base.2=/home/valera/rfid-scanner-main/android-app/app/build/intermediates/dex/debug/mergeProjectDexDebug/10/classes.dex
