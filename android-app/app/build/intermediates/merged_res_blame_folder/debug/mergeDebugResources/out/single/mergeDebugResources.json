@@ -1,0 +1,22 @@
+[
+    {
+        "merged": "/home/valera/.gradle/daemon/8.9/com.smartschool.card.app-debug-59:/drawable_ic_launcher_foreground.xml.flat",
+        "source": "/home/valera/.gradle/daemon/8.9/com.smartschool.card.app-main-61:/drawable/ic_launcher_foreground.xml"
+    },
+    {
+        "merged": "/home/valera/.gradle/daemon/8.9/com.smartschool.card.app-debug-59:/xml_network_security_config.xml.flat",
+        "source": "/home/valera/.gradle/daemon/8.9/com.smartschool.card.app-main-61:/xml/network_security_config.xml"
+    },
+    {
+        "merged": "/home/valera/.gradle/daemon/8.9/com.smartschool.card.app-debug-59:/xml_apduservice.xml.flat",
+        "source": "/home/valera/.gradle/daemon/8.9/com.smartschool.card.app-main-61:/xml/apduservice.xml"
+    },
+    {
+        "merged": "com.smartschool.card.app-debug-59:/xml_apduservice.xml.flat",
+        "source": "com.smartschool.card.app-main-61:/xml/apduservice.xml"
+    },
+    {
+        "merged": "/home/valera/.gradle/daemon/8.9/com.smartschool.card.app-debug-59:/mipmap-anydpi-v26_ic_launcher.xml.flat",
+        "source": "/home/valera/.gradle/daemon/8.9/com.smartschool.card.app-main-61:/mipmap-anydpi-v26/ic_launcher.xml"
+    }
+]

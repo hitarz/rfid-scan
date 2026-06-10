@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">#2563EB</color>
+    <string name="app_name">Smart School Card</string>
+    <string name="nfc_service_desc">Smart School digital pass</string>
+    <style name="Theme.SmartSchoolCard" parent="android:Theme.Material.Light.NoActionBar"/>
+</resources>
