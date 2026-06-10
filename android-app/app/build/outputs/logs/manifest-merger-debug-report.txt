@@ -1,9 +1,9 @@
 -- Merging decision tree log ---
 manifest
-ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:2:1-46:12
-INJECTED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:2:1-46:12
-INJECTED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:2:1-46:12
-INJECTED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:2:1-46:12
+ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:2:1-47:12
+INJECTED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:2:1-47:12
+INJECTED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:2:1-47:12
+INJECTED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:2:1-47:12
 MERGED from [androidx.navigation:navigation-common:2.8.4] /home/valera/.gradle/caches/8.9/transforms/762992857a2509213f78291299bb8946/transformed/navigation-common-2.8.4/AndroidManifest.xml:17:1-22:12
 MERGED from [androidx.navigation:navigation-runtime:2.8.4] /home/valera/.gradle/caches/8.9/transforms/a11d4ede99ff25cf2ec652eba74aab9c/transformed/navigation-runtime-2.8.4/AndroidManifest.xml:17:1-22:12
 MERGED from [androidx.navigation:navigation-common-ktx:2.8.4] /home/valera/.gradle/caches/8.9/transforms/6c1bc535d838640f1227f98d33019a09/transformed/navigation-common-ktx-2.8.4/AndroidManifest.xml:2:1-7:12
@@ -98,8 +98,8 @@ ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManife
 	android:name
 		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:11:9-48
 application
-ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:14:5-45:19
-INJECTED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:14:5-45:19
+ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:14:5-46:19
+INJECTED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:14:5-46:19
 MERGED from [androidx.credentials:credentials-play-services-auth:1.3.0] /home/valera/.gradle/caches/8.9/transforms/f6fe3e696a30abf4fd3c994b702ac050/transformed/credentials-play-services-auth-1.3.0/AndroidManifest.xml:23:5-42:19
 MERGED from [androidx.credentials:credentials-play-services-auth:1.3.0] /home/valera/.gradle/caches/8.9/transforms/f6fe3e696a30abf4fd3c994b702ac050/transformed/credentials-play-services-auth-1.3.0/AndroidManifest.xml:23:5-42:19
 MERGED from [com.google.android.gms:play-services-auth:21.1.1] /home/valera/.gradle/caches/8.9/transforms/59f32be17bf99026550ec92a9492519e/transformed/play-services-auth-21.1.1/AndroidManifest.xml:22:5-38:19
@@ -131,7 +131,7 @@ MERGED from [androidx.versionedparcelable:versionedparcelable:1.1.1] /home/valer
 	android:appComponentFactory
 		ADDED from [androidx.core:core:1.15.0] /home/valera/.gradle/caches/8.9/transforms/cd46abea9d16e862d0dfae7b2db85bca/transformed/core-1.15.0/AndroidManifest.xml:28:18-86
 	android:supportsRtl
-		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:20:9-35
+		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:21:9-35
 	android:label
 		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:18:9-41
 	android:icon
@@ -139,51 +139,53 @@ MERGED from [androidx.versionedparcelable:versionedparcelable:1.1.1] /home/valer
 	android:allowBackup
 		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:16:9-35
 	android:theme
-		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:21:9-53
+		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:22:9-53
 	android:networkSecurityConfig
-		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:19:9-69
+		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:20:9-69
+	android:usesCleartextTraffic
+		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:19:9-44
 	android:name
 		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:15:9-39
 activity#com.smartschool.card.MainActivity
-ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:23:9-32:20
+ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:24:9-33:20
 	android:launchMode
-		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:26:13-43
+		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:27:13-43
 	android:exported
-		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:25:13-36
+		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:26:13-36
 	android:theme
-		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:27:13-57
+		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:28:13-57
 	android:name
-		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:24:13-41
+		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:25:13-41
 intent-filter#action:name:android.intent.action.MAIN+category:name:android.intent.category.LAUNCHER
-ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:28:13-31:29
+ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:29:13-32:29
 action#android.intent.action.MAIN
-ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:29:17-69
+ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:30:17-69
 	android:name
-		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:29:25-66
+		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:30:25-66
 category#android.intent.category.LAUNCHER
-ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:30:17-77
+ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:31:17-77
 	android:name
-		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:30:27-74
+		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:31:27-74
 service#com.smartschool.card.nfc.CardEmulationService
-ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:34:9-44:19
+ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:35:9-45:19
 	android:exported
-		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:36:13-36
+		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:37:13-36
 	android:permission
-		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:37:13-69
+		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:38:13-69
 	android:name
-		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:35:13-53
+		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:36:13-53
 intent-filter#action:name:android.nfc.cardemulation.action.HOST_APDU_SERVICE
-ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:38:13-40:29
+ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:39:13-41:29
 action#android.nfc.cardemulation.action.HOST_APDU_SERVICE
-ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:39:17-93
+ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:40:17-93
 	android:name
-		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:39:25-90
+		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:40:25-90
 meta-data#android.nfc.cardemulation.host_apdu_service
-ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:41:13-43:55
+ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:42:13-44:55
 	android:resource
-		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:43:17-52
+		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:44:17-52
 	android:name
-		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:42:17-75
+		ADDED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml:43:17-75
 uses-sdk
 INJECTED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml reason: use-sdk injection requested
 INJECTED from /home/valera/rfid-scanner-main/android-app/app/src/main/AndroidManifest.xml

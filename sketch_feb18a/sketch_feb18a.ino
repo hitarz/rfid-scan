@@ -20,7 +20,7 @@ const char* pass_2 = "12345678";
 WiFiMulti wifiMulti; 
 // =============================================
 
-const char* serverUrl = "http://home.local:5000/api/scan";
+const char* serverUrl = "http://141.147.21.34:5000/api/scan";
 const char* token = "TOKEN_EXIT";
 const char* hmacSecret = "SmartSchool_Secret_Key_2026";
 

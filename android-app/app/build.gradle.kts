@@ -16,7 +16,7 @@ android {
         versionName = "1.0.0"
 
         // Change to your server address (use 10.0.2.2 for Android emulator → host localhost)
-        buildConfigField("String", "SERVER_URL", "\"http://192.168.88.53:5000\"")
+        buildConfigField("String", "SERVER_URL", "\"http://141.147.21.34:5000\"")
         // Web client ID from Google Cloud Console (OAuth 2.0 Client ID, type: Android + Web)
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"212825784614-ps6ec77rr266tsb9ivni2luudi9k8192.apps.googleusercontent.com\"")
     }

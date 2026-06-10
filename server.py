@@ -1249,7 +1249,7 @@ def scan_card():
     if not user:
         _record_pending_nfc_scan(conn, hw_uid)
         conn.close()
-        return gettext('scan_denied_unknown_card', scan_lang), 404
+        return gettext('scan_denied_unknown_card', scan_lang), 403
 
     now = datetime.now() - timedelta(seconds=offset_sec)
 
@@ -1616,7 +1616,7 @@ def mobile_scan_prep():
         (user['google_id'],),
     )
     prep_id = str(uuid.uuid4())
-    expires_at = (datetime.now() + timedelta(seconds=60)).strftime('%Y-%m-%d %H:%M:%S')
+    expires_at = (datetime.now() + timedelta(seconds=5)).strftime('%Y-%m-%d %H:%M:%S')
     conn.execute(
         '''INSERT INTO scan_prep_sessions (id, google_id, card_uid, status, expires_at)
            VALUES (?, ?, ?, 'waiting', ?)''',
@@ -1628,7 +1628,7 @@ def mobile_scan_prep():
         'prep_id': prep_id,
         'card_uid': user['card_uid'],
         'expires_at': expires_at,
-        'instructions': 'Hold phone to ESP32 reader within 60 seconds.',
+        'instructions': 'Hold phone to ESP32 reader within 5 seconds.',
     })
 
 

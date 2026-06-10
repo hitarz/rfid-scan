@@ -24,7 +24,7 @@
      `keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android`
 5. У `app/build.gradle.kts` вкажіть:
    - `GOOGLE_WEB_CLIENT_ID` — Web Client ID з кроку 3
-   - `SERVER_URL` — адреса Flask-сервера (наприклад `http://192.168.1.100:5000`)
+   - `SERVER_URL` — адреса Flask-сервера (наприклад `http://141.147.21.34:5000`)
 6. У `.env` на сервері додайте той самий Web Client ID:
    ```
    GOOGLE_CLIENT_ID=ваш-web-client-id.apps.googleusercontent.com

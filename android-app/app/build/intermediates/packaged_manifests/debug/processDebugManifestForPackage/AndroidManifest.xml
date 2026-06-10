@@ -35,7 +35,8 @@
         android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="true"
         android:testOnly="true"
-        android:theme="@style/Theme.SmartSchoolCard" >
+        android:theme="@style/Theme.SmartSchoolCard"
+        android:usesCleartextTraffic="true" >
         <activity
             android:name="com.smartschool.card.MainActivity"
             android:exported="true"

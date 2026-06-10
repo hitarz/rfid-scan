@@ -12,5 +12,5 @@ public final class BuildConfig {
   // Field from default config.
   public static final String GOOGLE_WEB_CLIENT_ID = "212825784614-ps6ec77rr266tsb9ivni2luudi9k8192.apps.googleusercontent.com";
   // Field from default config.
-  public static final String SERVER_URL = "http://192.168.88.53:5000";
+  public static final String SERVER_URL = "http://141.147.21.34:5000";
 }

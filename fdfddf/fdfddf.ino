@@ -19,7 +19,7 @@ const char* pass_2 = "12345678";
 // Створюємо об'єкт для мульти-підключення
 WiFiMulti wifiMulti; 
 // =============================================
-const char* serverUrl = "http://192.168.88.53:5000/api/scan";
+const char* serverUrl = "http://141.147.21.34:5000/api/scan";
 const char* token = "TOKEN_ENTRY";
 const char* hmacSecret = "SmartSchool_Secret_Key_2026";
 

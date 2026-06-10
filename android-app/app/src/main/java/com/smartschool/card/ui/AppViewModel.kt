@@ -136,20 +136,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     it.copy(
                         isLoading = false,
                         passStatus = "waiting",
-                        successMessage = "Прикладіть телефон до зчитувача (60 сек)",
+                        successMessage = "Прикладіть телефон до зчитувача (5 сек)",
                     )
                 }
                 pollPrep(prep.prep_id)
-            } catch (e: Exception) {
-                // Офлайн-відмовостійкість: Якщо немає з'єднання, не видаємо червону помилку. 
-                // HCE-емуляція продовжує працювати автономно (залежить від сумісності зчитувача).
-                _state.update { 
-                    it.copy(
-                        isLoading = false, 
-                        passStatus = "offline",
-                        successMessage = "Офлайн режим. Прикладіть телефон (зчитувач має підтримувати HCE)."
-                    ) 
+            } catch (e: ApiException) {
+                if (e.code == 0) {
+                    // Офлайн-відмовостійкість: Якщо немає з'єднання, не видаємо червону помилку. 
+                    // HCE-емуляція продовжує працювати автономно (залежить від сумісності зчитувача).
+                    _state.update { 
+                        it.copy(
+                            isLoading = false, 
+                            passStatus = "offline",
+                            successMessage = "Офлайн режим. Прикладіть телефон (зчитувач має підтримувати HCE)."
+                        ) 
+                    }
+                } else {
+                    _state.update { it.copy(isLoading = false, error = formatError(e)) }
                 }
+            } catch (e: Exception) {
+                _state.update { it.copy(isLoading = false, error = formatError(e)) }
             }
         }
     }
@@ -157,9 +163,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun pollPrep(prepId: String) {
         val token = session.token ?: return
         pollJob = viewModelScope.launch {
-            repeat(30) {
+            repeat(10) {
                 if (!isActive) return@launch
-                delay(2000)
+                delay(500)
                 try {
                     val status = withContext(Dispatchers.IO) { api.scanPrepStatus(token, prepId) }
                     when (status.status) {
