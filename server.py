@@ -601,7 +601,9 @@ def stats():
 
 @app.route('/api/scan', methods=['GET'])
 def scan_card():
-    scan_lang = parse_accept_language(request.headers.get('Accept-Language'))
+    # ESP32 не надсилає Accept-Language, тому за замовчуванням ставимо 'uk'
+    header_lang = request.headers.get('Accept-Language')
+    scan_lang = parse_accept_language(header_lang) if header_lang else 'uk'
 
     uid = request.args.get('uid')
     token = request.args.get('token')
