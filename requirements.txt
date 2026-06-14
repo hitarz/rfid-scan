@@ -4,3 +4,5 @@ python-dotenv
 pyTelegramBotAPI
 requests
 schedule
+openpyxl
+werkzeug

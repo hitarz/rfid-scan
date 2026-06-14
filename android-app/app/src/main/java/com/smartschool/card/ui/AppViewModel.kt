@@ -6,16 +6,16 @@ import androidx.lifecycle.viewModelScope
 import com.smartschool.card.SmartSchoolApp
 import com.smartschool.card.data.ApiException
 import com.smartschool.card.data.ApiService
+import com.smartschool.card.nfc.HceScanEvents
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 
 data class UiState(
     val isLoading: Boolean = false,
@@ -24,7 +24,8 @@ data class UiState(
     val displayName: String = "",
     val cardUid: String? = null,
     val classGroup: String? = null,
-    val passStatus: String? = null,
+    // null = не сканувалось, інакше час останнього сканування у форматі "HH:mm"
+    val lastScanTime: String? = null,
     val error: String? = null,
     val successMessage: String? = null,
 )
@@ -32,7 +33,6 @@ data class UiState(
 class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val session = (application as SmartSchoolApp).sessionManager
     private val api = ApiService()
-    private var pollJob: Job? = null
 
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
@@ -47,8 +47,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     cardUid = session.cardUid,
                 )
             }
-
             refreshProfile()
+        }
+
+        // Слухаємо події успішного HCE-сканування від CardEmulationService
+        viewModelScope.launch {
+            HceScanEvents.flow.collect { cardUid ->
+                val timeStr = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
+                _state.update {
+                    it.copy(lastScanTime = timeStr)
+                }
+            }
         }
     }
 
@@ -64,11 +73,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 ?: "Невідома помилка"
         }
     }
-
-    private fun isClassUnassigned(classGroup: String?) =
-        classGroup.isNullOrBlank() || classGroup == CLASS_UNASSIGNED
-
-
 
     fun onGoogleSignInStarted() {
         _state.update { it.copy(isLoading = true, error = null) }
@@ -94,7 +98,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         successMessage = "Вхід виконано",
                     )
                 }
-
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = formatError(e)) }
             }
@@ -120,80 +123,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
             } catch (_: Exception) {
-                // Offline — keep local data
+                // Offline — зберігаємо локальні дані
             }
         }
     }
 
-    fun startPass() {
-        val token = session.token ?: return
-        pollJob?.cancel()
-        viewModelScope.launch {
-            _state.update { it.copy(isLoading = true, error = null, passStatus = null) }
-            try {
-                val prep = withContext(Dispatchers.IO) { api.startScanPrep(token) }
-                _state.update {
-                    it.copy(
-                        isLoading = false,
-                        passStatus = "waiting",
-                        successMessage = "Прикладіть телефон до зчитувача (5 сек)",
-                    )
-                }
-                pollPrep(prep.prep_id)
-            } catch (e: ApiException) {
-                if (e.code == 0) {
-                    // Офлайн-відмовостійкість: Якщо немає з'єднання, не видаємо червону помилку. 
-                    // HCE-емуляція продовжує працювати автономно (залежить від сумісності зчитувача).
-                    _state.update { 
-                        it.copy(
-                            isLoading = false, 
-                            passStatus = "offline",
-                            successMessage = "Офлайн режим. Прикладіть телефон (зчитувач має підтримувати HCE)."
-                        ) 
-                    }
-                } else {
-                    _state.update { it.copy(isLoading = false, error = formatError(e)) }
-                }
-            } catch (e: Exception) {
-                _state.update { it.copy(isLoading = false, error = formatError(e)) }
-            }
-        }
-    }
-
-    private fun pollPrep(prepId: String) {
-        val token = session.token ?: return
-        pollJob = viewModelScope.launch {
-            repeat(10) {
-                if (!isActive) return@launch
-                delay(500)
-                try {
-                    val status = withContext(Dispatchers.IO) { api.scanPrepStatus(token, prepId) }
-                    when (status.status) {
-                        "used" -> {
-                            _state.update {
-                                it.copy(
-                                    passStatus = "used",
-                                    successMessage = "Прохід зафіксовано (${status.card_uid})",
-                                )
-                            }
-                            return@launch
-                        }
-                        "expired" -> {
-                            _state.update {
-                                it.copy(passStatus = "expired", error = "Час вичерпано. Спробуйте ще раз.")
-                            }
-                            return@launch
-                        }
-                    }
-                } catch (_: Exception) {
-                    // keep polling
-                }
-            }
-            _state.update {
-                it.copy(passStatus = "expired", error = "Сканування не отримано")
-            }
-        }
-    }
     fun createCard() {
         val token = session.token ?: return
         viewModelScope.launch {
@@ -215,10 +149,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-
-
     fun logout() {
-        pollJob?.cancel()
         val token = session.token
         viewModelScope.launch {
             if (token != null) {
@@ -233,6 +164,5 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
         const val CLASS_UNASSIGNED = "Не задано"
-        val DEFAULT_CLASSES = listOf("5-А", "6-А", "10-А", "10-Б", "10-В", "11-А", "11-Б", "11-В")
     }
 }

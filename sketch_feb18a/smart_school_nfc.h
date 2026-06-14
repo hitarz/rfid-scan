@@ -1,36 +1,45 @@
 #pragma once
 
-#include <MFRC522.h>
+#include <Adafruit_PN532.h>
 
-inline String smartSchoolFormatHwUid(MFRC522 &mfrc522) {
-  String uidStr = "";
-  for (byte i = 0; i < mfrc522.uid.size; i++) {
-    if (mfrc522.uid.uidByte[i] < 0x10) uidStr += "0";
-    uidStr += String(mfrc522.uid.uidByte[i], HEX);
+// =====================================================================
+// SmartSchool NFC Helper — для PN532 (I2C/SPI/HSU)
+// Читає virtual card_uid з телефону (HCE) або hardware UID з картки
+// =====================================================================
+
+inline String smartSchoolFormatHwUid(uint8_t *uid, uint8_t uidLength) {
+  String s = "";
+  for (uint8_t i = 0; i < uidLength; i++) {
+    if (uid[i] < 0x10) s += "0";
+    s += String(uid[i], HEX);
   }
-  uidStr.toUpperCase();
-  return uidStr;
+  s.toUpperCase();
+  return s;
 }
 
-inline bool smartSchoolIsHexChar(char c) {
-  return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f');
-}
-
-inline bool smartSchoolExtractIdFromBytes(const byte *data, byte len, String &outId) {
+// Витягує 8-символьний HEX ID або "SSCARD:XXXXXXXX" із сирих байт відповіді
+inline bool smartSchoolExtractIdFromBytes(const uint8_t *data, uint8_t len, String &outId) {
+  // Спроба 1: 8 послідовних hex-символів ASCII
   String raw = "";
-  for (byte i = 0; i < len; i++) {
+  for (uint8_t i = 0; i < len; i++) {
     char c = (char)data[i];
-    if (smartSchoolIsHexChar(c)) raw += (char)toupper(c);
-    else if (raw.length() >= 8) break;
-    else raw = "";
+    bool isHex = (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f');
+    if (isHex) {
+      raw += (char)toupper(c);
+    } else if (raw.length() >= 8) {
+      break;
+    } else {
+      raw = "";
+    }
   }
   if (raw.length() >= 8) {
     outId = raw.substring(0, 8);
     return true;
   }
 
+  // Спроба 2: маркер "SSCARD:XXXXXXXX" у тексті
   String text = "";
-  for (byte i = 0; i < len; i++) {
+  for (uint8_t i = 0; i < len; i++) {
     char c = (char)data[i];
     if (c >= 32 && c <= 126) text += c;
   }
@@ -43,68 +52,61 @@ inline bool smartSchoolExtractIdFromBytes(const byte *data, byte len, String &ou
   return false;
 }
 
-inline bool smartSchoolIsoTransceive(MFRC522 &mfrc522, byte *apdu, byte apduLen, byte *back, byte *backLen) {
-  byte frame[64];
-  if (apduLen + 1 > sizeof(frame)) return false;
-  frame[0] = 0x02;
-  memcpy(frame + 1, apdu, apduLen);
-  MFRC522::StatusCode status = mfrc522.PCD_TransceiveData(frame, apduLen + 1, back, backLen);
-  return status == MFRC522::STATUS_OK && *backLen > 0;
-}
+// Намагається прочитати virtual ID з телефону через APDU (HCE)
+// PN532 автоматично обробляє ISO 14443-4, тому RATS не потрібен окремо
+inline bool smartSchoolReadVirtualIdFromPhone(Adafruit_PN532 &nfc, String &outId) {
+  uint8_t response[64];
+  uint8_t responseLength;
 
-inline bool smartSchoolActivateIso(MFRC522 &mfrc522) {
-  byte rats[] = {0xE0, 0x50};
-  byte buf[32];
-  byte len = sizeof(buf);
-  return mfrc522.PCD_TransceiveData(rats, 2, buf, &len) == MFRC522::STATUS_OK;
-}
-
-inline bool smartSchoolApduOk(MFRC522 &mfrc522, byte *apdu, byte apduLen) {
-  byte resp[32];
-  byte respLen = sizeof(resp);
-  if (!smartSchoolIsoTransceive(mfrc522, apdu, apduLen, resp, &respLen)) return false;
-  return respLen >= 2 && resp[respLen - 2] == 0x90 && resp[respLen - 1] == 0x00;
-}
-
-inline bool smartSchoolTryApdu(MFRC522 &mfrc522, byte *apdu, byte apduLen, String &outId) {
-  byte resp[96];
-  byte respLen = sizeof(resp);
-  if (!smartSchoolIsoTransceive(mfrc522, apdu, apduLen, resp, &respLen)) return false;
-
-  if (respLen >= 2 && resp[respLen - 2] == 0x90 && resp[respLen - 1] == 0x00) {
-    if (smartSchoolExtractIdFromBytes(resp, respLen - 2, outId)) return true;
-  }
-  return smartSchoolExtractIdFromBytes(resp, respLen, outId);
-}
-
-inline bool smartSchoolReadVirtualIdFromPhone(MFRC522 &mfrc522, String &outId) {
-  MFRC522::PICC_Type type = mfrc522.PICC_GetType(mfrc522.uid.sak);
-  if (type != MFRC522::PICC_TYPE_ISO_14443_4) return false;
-
-  smartSchoolActivateIso(mfrc522);
-
-  byte selectSs[] = {0x00, 0xA4, 0x04, 0x00, 0x07, 0xF0, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
-  byte getCmd[] = {0x80, 0xCB, 0x00, 0x00, 0x08};
-  if (smartSchoolApduOk(mfrc522, selectSs, sizeof(selectSs))) {
-    if (smartSchoolTryApdu(mfrc522, getCmd, sizeof(getCmd), outId)) return true;
+  // --- Метод 1: SmartSchool AID (F0010203040506) ---
+  uint8_t selectSs[] = {0x00, 0xA4, 0x04, 0x00, 0x07,
+                         0xF0, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
+  responseLength = sizeof(response);
+  if (nfc.inDataExchange(selectSs, sizeof(selectSs), response, &responseLength)) {
+    if (responseLength >= 2 &&
+        response[responseLength - 2] == 0x90 &&
+        response[responseLength - 1] == 0x00) {
+      // GET CARD UID: 80 CB 00 00 08
+      uint8_t getCmd[] = {0x80, 0xCB, 0x00, 0x00, 0x08};
+      responseLength = sizeof(response);
+      if (nfc.inDataExchange(getCmd, sizeof(getCmd), response, &responseLength)) {
+        if (smartSchoolExtractIdFromBytes(response, responseLength, outId)) return true;
+      }
+    }
   }
 
-  byte selectNdef[] = {0x00, 0xA4, 0x04, 0x00, 0x07, 0xD2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01};
-  byte readBin[] = {0x00, 0xB0, 0x00, 0x00, 0x30};
-  if (smartSchoolApduOk(mfrc522, selectNdef, sizeof(selectNdef))) {
-    if (smartSchoolTryApdu(mfrc522, readBin, sizeof(readBin), outId)) return true;
+  // --- Метод 2: NDEF AID (D2760000850101) → READ BINARY ---
+  uint8_t selectNdef[] = {0x00, 0xA4, 0x04, 0x00, 0x07,
+                           0xD2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01};
+  responseLength = sizeof(response);
+  if (nfc.inDataExchange(selectNdef, sizeof(selectNdef), response, &responseLength)) {
+    if (responseLength >= 2 &&
+        response[responseLength - 2] == 0x90 &&
+        response[responseLength - 1] == 0x00) {
+      uint8_t readBin[] = {0x00, 0xB0, 0x00, 0x00, 0x30};
+      responseLength = sizeof(response);
+      if (nfc.inDataExchange(readBin, sizeof(readBin), response, &responseLength)) {
+        if (smartSchoolExtractIdFromBytes(response, responseLength, outId)) return true;
+      }
+    }
   }
 
   return false;
 }
 
-inline String smartSchoolResolveCardId(MFRC522 &mfrc522) {
+// Головна функція: повертає card_uid (virtual з телефону АБО hardware)
+// Завжди спочатку пробує APDU (HCE), якщо не вдалось — повертає hardware UID
+inline String smartSchoolResolveCardId(Adafruit_PN532 &nfc, uint8_t *uid, uint8_t uidLength) {
+  // Спочатку завжди пробуємо прочитати virtual ID через APDU
+  // Для звичайних карток це просто швидко поверне false
   String virtualId;
-  if (smartSchoolReadVirtualIdFromPhone(mfrc522, virtualId)) {
+  if (smartSchoolReadVirtualIdFromPhone(nfc, virtualId)) {
     Serial.println("SmartSchool virtual ID: " + virtualId);
     return virtualId;
   }
-  String hw = smartSchoolFormatHwUid(mfrc522);
+
+  // Якщо APDU не спрацював — повертаємо апаратний UID
+  String hw = smartSchoolFormatHwUid(uid, uidLength);
   Serial.println("Hardware UID: " + hw);
   return hw;
 }

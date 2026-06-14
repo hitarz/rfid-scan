@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="{{ t.html_lang }}" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>{{ t.page_title_classes }}</title>
+    {% raw %}
+    <script>
+        if (localStorage.getItem('color-theme') === 'dark' || (!('color-theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) { document.documentElement.classList.add('dark'); } else { document.documentElement.classList.remove('dark') }
+    </script>
+    {% endraw %}
+    <script src="https://cdn.tailwindcss.com"></script>
+    {% raw %}
+    <script>tailwind.config = { darkMode: 'class', theme: { extend: {} } }</script>
+    <style>
+       .glass-panel { background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.3); }
+       .dark .glass-panel { background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(255, 255, 255, 0.1); }
+       details > summary { list-style: none; }
+       details > summary::-webkit-details-marker { display: none; }
+    </style>
+    {% endraw %}
+</head>
+<body class="bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200 transition-colors duration-300 font-sans antialiased min-h-screen relative bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] pb-24 md:pb-12">
+    {% include "nav.html" %}
+    <div class="max-w-screen-md mx-auto pt-20 md:pt-24 px-3 md:px-4">
+        <div class="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-6">
+            <h2 class="text-xl md:text-2xl font-bold text-slate-900 dark:text-white">{{ t.classes_heading }}</h2>
+            <div class="relative w-full md:w-64">
+                <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                    <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                </div>
+                <input type="text" id="searchInput" onkeyup="filterStudents()" placeholder="{{ t.search_placeholder }}" class="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-sm rounded-xl pl-10 pr-4 py-2 outline-none w-full dark:text-white shadow-sm focus:ring-2 focus:ring-blue-500">
+            </div>
+        </div>
+
+        <div class="flex flex-col gap-3">
+            {% for class_name, students in grouped_users.items() %}
+            <details class="glass-panel rounded-xl shadow-md group">
+                <summary class="text-base md:text-lg font-bold p-4 text-slate-900 dark:text-white cursor-pointer flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/30 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                    <div class="flex items-center gap-3">
+                        {{ class_name }}
+                        <span class="bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300 text-xs px-2 py-0.5 rounded-full font-semibold">{{ students|length }} {{ t.students_count }}</span>
+                    </div>
+                    <svg class="w-5 h-5 text-slate-400 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                </summary>
+                <div class="flex flex-col px-2 md:px-4 pb-2 border-t border-slate-200/50 dark:border-slate-700/50">
+                    {% for student in students %}
+                    <div class="student-row flex flex-col md:flex-row md:items-center justify-between py-3 border-b border-slate-100 dark:border-slate-800 last:border-0" data-name="{{ student.name|lower }}">
+                        <div class="mb-2 md:mb-0 flex items-baseline gap-2 px-2">
+                            <span class="font-medium text-slate-800 dark:text-slate-200 text-sm">{{ student.name }}</span>
+                            <span class="text-[10px] text-slate-400 font-mono">{{ student.uid }}</span>
+                        </div>
+                        <form action="/api/set_excuse" method="POST" class="flex gap-2 px-2 md:px-0">
+                            <input type="hidden" name="uid" value="{{ student.uid }}">
+                            <button type="submit" name="excuse" value="{{ canon.excuse_sick }}" class="flex-1 md:flex-none text-amber-700 bg-amber-100 active:scale-95 hover:bg-amber-200 dark:text-amber-400 dark:bg-amber-900/40 font-medium rounded-lg text-xs px-3 py-1.5 transition-colors border border-amber-200 dark:border-amber-800/50 shadow-sm flex justify-center items-center gap-1.5">
+                                🏥 <span class="md:inline">{{ t.btn_sick_label }}</span>
+                            </button>
+                            <button type="submit" name="excuse" value="{{ canon.excuse_released }}" class="flex-1 md:flex-none text-blue-700 bg-blue-100 active:scale-95 hover:bg-blue-200 dark:text-blue-400 dark:bg-blue-900/40 font-medium rounded-lg text-xs px-3 py-1.5 transition-colors border border-blue-200 dark:border-blue-800/50 shadow-sm flex justify-center items-center gap-1.5">
+                                ✈️ <span class="md:inline">{{ t.btn_released_label }}</span>
+                            </button>
+                        </form>
+                    </div>
+                    {% endfor %}
+                </div>
+            </details>
+            {% endfor %}
+        </div>
+    </div>
+
+    <script>
+{% raw %}
+        function filterStudents() {
+            const term = document.getElementById('searchInput').value.toLowerCase();
+            const detailsElements = document.querySelectorAll('details');
+            document.querySelectorAll('.student-row').forEach(row => {
+                const name = row.getAttribute('data-name');
+                if(name.includes(term)) { row.style.display = ''; }
+                else { row.style.display = 'none'; }
+            });
+            detailsElements.forEach(detail => {
+                if (term.length > 0) { detail.setAttribute('open', ''); }
+                else { detail.removeAttribute('open'); }
+            });
+        }
+{% endraw %}
+    </script>
+</body>
+</html>

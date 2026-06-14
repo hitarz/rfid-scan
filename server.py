@@ -1,4 +1,4 @@
-from flask import Flask, request, render_template_string, redirect, url_for, jsonify, Response, g, session, flash
+from flask import Flask, request, render_template, redirect, url_for, jsonify, Response, g, session, flash
 from flask_socketio import SocketIO
 import sqlite3
 from datetime import datetime, timedelta
@@ -16,6 +16,8 @@ import os
 import secrets
 import uuid
 from dotenv import load_dotenv
+from werkzeug.security import generate_password_hash, check_password_hash
+import openpyxl
 
 from translations import (
     CANONICAL,
@@ -73,17 +75,38 @@ LESSONS = [
     {"num": 8, "start": "15:30", "end": "20:15"}
 ]
 
-def check_auth(username, password):
-    return username == ADMIN_LOGIN and password == ADMIN_PASS
-
-def authenticate():
-    return Response(gettext('err_auth_required'), 401, {'WWW-Authenticate': 'Basic realm="Admin Panel"'})
+def get_current_user():
+    username = session.get('web_user')
+    if not username:
+        return None
+    conn = get_db_connection()
+    row = conn.execute('SELECT * FROM web_users WHERE username = ?', (username,)).fetchone()
+    if not row:
+        conn.close()
+        return None
+    classes = [r['class_group'] for r in conn.execute('SELECT class_group FROM teacher_classes WHERE username = ?', (username,)).fetchall()]
+    conn.close()
+    return {'username': row['username'], 'role': row['role'], 'display_name': row['display_name'], 'classes': classes}
 
 def requires_auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        auth = request.authorization
-        if not auth or not check_auth(auth.username, auth.password): return authenticate()
+        user = get_current_user()
+        if not user:
+            return redirect(url_for('login_page'))
+        g.web_user = user
+        return f(*args, **kwargs)
+    return decorated
+
+def requires_admin(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        user = get_current_user()
+        if not user:
+            return redirect(url_for('login_page'))
+        if user['role'] != 'admin':
+            return "Forbidden: Admin only", 403
+        g.web_user = user
         return f(*args, **kwargs)
     return decorated
 
@@ -143,768 +166,6 @@ def build_index_i18n_obj():
     }
 
 
-# === Shared navigation (Jinja: pass `t` as LANGUAGES[g.lang]) ===
-NAV_HTML = """
-<nav class="glass-panel fixed w-full z-30 top-0 shadow-sm transition-all duration-300">
-    <div class="max-w-screen-2xl flex flex-wrap items-center justify-between mx-auto p-3 md:p-4">
-        <a href="/" class="flex items-center space-x-2 md:space-x-3 group">
-            <div class="w-8 h-8 md:w-10 md:h-10 flex items-center justify-center shrink-0 drop-shadow-sm group-hover:scale-105 transition-transform">
-                <img src="/static/logo.png" alt="{{ t.nav_logo_alt }}" class="w-full h-full object-contain">
-            </div>
-            <span class="self-center text-xl md:text-2xl font-bold whitespace-nowrap dark:text-white tracking-tight">Smart<span class="text-blue-600 dark:text-blue-400">School</span></span>
-        </a>
-        <div class="flex items-center space-x-2 md:space-x-4">
-            <div class="hidden md:flex items-center space-x-2">
-                <a href="/classes" class="text-sm font-medium text-slate-700 hover:text-blue-600 dark:text-slate-200 dark:hover:text-blue-400 bg-slate-200/50 hover:bg-slate-300/50 dark:bg-slate-800 dark:hover:bg-slate-700 px-3 py-2 rounded-xl transition-colors shadow-sm">{{ t.nav_link_classes }}</a>
-                <a href="/stats" class="text-sm font-medium text-slate-700 hover:text-blue-600 dark:text-slate-200 dark:hover:text-blue-400 bg-slate-200/50 hover:bg-slate-300/50 dark:bg-slate-800 dark:hover:bg-slate-700 px-3 py-2 rounded-xl transition-colors shadow-sm">📊 {{ t.nav_link_stats }}</a>
-                <a href="/settings" class="text-sm font-medium text-slate-700 hover:text-blue-600 dark:text-slate-200 dark:hover:text-blue-400 bg-slate-200/50 hover:bg-slate-300/50 dark:bg-slate-800 dark:hover:bg-slate-700 px-3 py-2 rounded-xl transition-colors shadow-sm">⚙️ {{ t.nav_link_settings }}</a>
-            </div>
-            <div class="flex items-center gap-1 text-[10px] font-semibold uppercase text-slate-500 dark:text-slate-400">
-                <a href="?lang=en" class="px-1.5 py-0.5 rounded hover:bg-slate-200 dark:hover:bg-slate-700">en</a>
-                <span class="opacity-40">|</span>
-                <a href="?lang=uk" class="px-1.5 py-0.5 rounded hover:bg-slate-200 dark:hover:bg-slate-700">UA</a>
-            </div>
-            <button id="theme-toggle" type="button" class="text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl p-2 md:p-2.5 transition-colors">
-                <svg id="theme-toggle-dark-icon" class="hidden w-5 h-5 md:w-6 md:h-6" fill="currentColor" viewBox="0 0 20 20"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"></path></svg>
-                <svg id="theme-toggle-light-icon" class="hidden w-5 h-5 md:w-6 md:h-6" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z"></path></svg>
-            </button>
-        </div>
-    </div>
-</nav>
-<div class="md:hidden fixed bottom-0 w-full z-40 glass-panel border-t border-slate-200 dark:border-slate-700 pb-2">
-    <div class="flex justify-around items-center px-2 pt-2">
-        <a href="/" class="flex flex-col items-center text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 p-2">
-            <svg class="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
-            <span class="text-[10px] font-semibold">{{ t.nav_mobile_journal }}</span>
-        </a>
-        <a href="/classes" class="flex flex-col items-center text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 p-2">
-            <svg class="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
-            <span class="text-[10px] font-semibold">{{ t.nav_mobile_lists }}</span>
-        </a>
-        <a href="/stats" class="flex flex-col items-center text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 p-2">
-            <svg class="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
-            <span class="text-[10px] font-semibold">{{ t.nav_mobile_analytics }}</span>
-        </a>
-        <a href="/settings" class="flex flex-col items-center text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 p-2">
-            <svg class="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-            <span class="text-[10px] font-semibold">{{ t.nav_mobile_settings_short }}</span>
-        </a>
-    </div>
-</div>
-<script>
-    const themeBtn = document.getElementById('theme-toggle');
-    const darkIcon = document.getElementById('theme-toggle-dark-icon');
-    const lightIcon = document.getElementById('theme-toggle-light-icon');
-    if (document.documentElement.classList.contains('dark')) lightIcon.classList.remove('hidden');
-    else darkIcon.classList.remove('hidden');
-    themeBtn.addEventListener('click', () => {
-        darkIcon.classList.toggle('hidden');
-        lightIcon.classList.toggle('hidden');
-        if (document.documentElement.classList.contains('dark')) {
-            document.documentElement.classList.remove('dark');
-            localStorage.setItem('color-theme', 'light');
-            if(typeof updateChartTheme === 'function') updateChartTheme('light');
-        } else {
-            document.documentElement.classList.add('dark');
-            localStorage.setItem('color-theme', 'dark');
-            if(typeof updateChartTheme === 'function') updateChartTheme('dark');
-        }
-    });
-</script>
-"""
-
-# === Main page ===
-HTML_PAGE = (
-"""
-<!DOCTYPE html>
-<html lang="{{ t.html_lang }}" class="light">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>{{ t.page_title_index }}</title>
-    {% raw %}
-    <script>
-        if (localStorage.getItem('color-theme') === 'dark' || (!('color-theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) { document.documentElement.classList.add('dark'); } else { document.documentElement.classList.remove('dark') }
-    </script>
-    {% endraw %}
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.1/socket.io.js"></script>
-    {% raw %}
-    <script>tailwind.config = { darkMode: 'class', theme: { extend: {} } }</script>
-<style>
-       .glass-panel { background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.3); }
-       .dark .glass-panel { background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(255, 255, 255, 0.1); }
-        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-        @keyframes fadeOut { to { opacity: 0; } }
-       .toast-enter { animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-       .toast-exit { animation: fadeOut 0.3s ease forwards; }
-       details > summary { list-style: none; }
-       details > summary::-webkit-details-marker { display: none; }
-    </style>
-    {% endraw %}
-</head>
-<body class="bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200 transition-colors duration-300 font-sans antialiased min-h-screen relative bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] pb-24 md:pb-12">
-"""
-+ NAV_HTML +
-"""
-    <div class="max-w-screen-2xl mx-auto pt-20 md:pt-24 px-3 md:px-4">
-        
-        <div class="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-6 mb-4 md:mb-6">
-            <div class="glass-panel rounded-xl md:rounded-2xl p-4 md:p-6 shadow-md cursor-pointer hover:scale-[1.02] transition-transform col-span-2 md:col-span-1" onclick="openStatsModal('present')">
-                <div class="flex items-center">
-                    <div class="p-2 md:p-3 bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-400 rounded-xl"><svg class="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg></div>
-                    <div class="ml-3 md:ml-4">
-                        <p class="text-xs md:text-sm font-medium text-slate-500 dark:text-slate-400">{{ t.stats_present_today }}</p>
-                        <p class="text-2xl md:text-3xl font-bold text-slate-800 dark:text-white" id="stat-total">0</p>
-                    </div>
-                </div>
-            </div>
-            <div class="glass-panel rounded-xl md:rounded-2xl p-4 md:p-6 shadow-md cursor-pointer hover:scale-[1.02] transition-transform" onclick="openStatsModal('ontime')">
-                <div class="flex items-center">
-                    <div class="p-2 md:p-3 bg-emerald-100 text-emerald-600 dark:bg-emerald-900/50 dark:text-emerald-400 rounded-xl"><svg class="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></div>
-                    <div class="ml-3 md:ml-4">
-                        <p class="text-xs md:text-sm font-medium text-slate-500 dark:text-slate-400">{{ t.stats_ontime }}</p>
-                        <p class="text-2xl md:text-3xl font-bold text-slate-800 dark:text-white" id="stat-ontime">0</p>
-                    </div>
-                </div>
-            </div>
-            <div class="glass-panel rounded-xl md:rounded-2xl p-4 md:p-6 shadow-md cursor-pointer hover:scale-[1.02] transition-transform" onclick="openStatsModal('late')">
-                <div class="flex items-center">
-                    <div class="p-2 md:p-3 bg-amber-100 text-amber-600 dark:bg-amber-900/50 dark:text-amber-400 rounded-xl"><svg class="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></div>
-                    <div class="ml-3 md:ml-4">
-                        <p class="text-xs md:text-sm font-medium text-slate-500 dark:text-slate-400">{{ t.stats_late_short }}</p>
-                        <p class="text-2xl md:text-3xl font-bold text-slate-800 dark:text-white" id="stat-late">0</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="grid grid-cols-1 xl:grid-cols-4 gap-4 md:gap-6">
-            <div class="xl:col-span-3">
-                <div class="glass-panel rounded-xl md:rounded-2xl shadow-lg overflow-hidden h-full">
-                    <div class="p-4 md:p-6 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
-                        <h3 class="text-lg md:text-xl font-bold flex items-center text-slate-900 dark:text-white">
-                            <span class="w-2 h-2 md:w-3 md:h-3 bg-emerald-500 rounded-full mr-2 md:mr-3 animate-pulse"></span> {{ t.journal_title }}
-                        </h3>
-                        <div class="flex gap-2">
-                            <a href="/api/export_csv" class="text-xs md:text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 px-3 md:px-4 py-1.5 md:py-2 rounded-lg shadow-sm">📥 {{ t.csv_export }}</a>
-                            <button type="button" onclick="purgeUnknownLogs()" class="text-xs md:text-sm font-medium text-slate-700 dark:text-slate-200 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 px-3 md:px-4 py-1.5 md:py-2 rounded-lg shadow-sm">🗑 Невідомі</button>
-                        </div>
-                    </div>
-                    <div class="overflow-x-auto max-h-[60vh] md:max-h-[600px] overflow-y-auto">
-                        <table class="w-full text-left text-slate-500 dark:text-slate-300">
-                            <thead class="text-[10px] md:text-xs text-slate-600 uppercase bg-slate-100 dark:bg-slate-800 dark:text-slate-300 sticky top-0 z-10 backdrop-blur-md">
-                                <tr>
-                                    <th scope="col" class="px-3 py-3 md:px-6 md:py-4 font-semibold">{{ t.th_time }}</th>
-                                    <th scope="col" class="hidden sm:table-cell px-3 py-3 md:px-6 md:py-4 font-semibold">{{ t.th_room }}</th>
-                                    <th scope="col" class="px-3 py-3 md:px-6 md:py-4 font-semibold">{{ t.th_student }}</th>
-                                    <th scope="col" class="px-3 py-3 md:px-6 md:py-4 font-semibold">{{ t.th_status }}</th>
-                                    <th scope="col" class="px-2 py-3 md:px-6 md:py-4 text-center"><button onclick="clearHiddenLogs();" class="text-[10px] text-blue-500">{{ t.clear_hidden }}</button></th>
-                                </tr>
-                            </thead>
-                            <tbody id="logs-body"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-
-            <div class="xl:col-span-1">
-                <div class="glass-panel rounded-xl md:rounded-2xl shadow-lg p-4 md:p-6">
-                    <h3 class="text-md md:text-lg font-bold mb-4 text-slate-900 dark:text-white">➕ {{ t.new_card_title }}</h3>
-                    <form action="/api/add_user" method="POST" class="flex flex-col gap-3 md:gap-4">
-                        <input type="text" name="uid" placeholder="{{ t.ph_uid }}" required class="bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-900 text-sm rounded-xl px-3 py-2 md:p-3 dark:text-white outline-none w-full">
-                        <input type="text" name="name" placeholder="{{ t.ph_student_name }}" required class="bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-900 text-sm rounded-xl px-3 py-2 md:p-3 dark:text-white outline-none w-full">
-                        <select name="class_group" class="bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-900 text-sm rounded-xl px-3 py-2 md:p-3 dark:text-white outline-none w-full">
-                            {% for c in classes %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
-                        </select>
-                        <button type="submit" class="w-full text-white bg-emerald-600 hover:bg-emerald-700 font-medium rounded-xl text-sm px-5 py-3 mt-1 shadow-md active:scale-95 transition-transform">{{ t.btn_save }}</button>
-                    </form>
-                </div>
-            </div>
-        </div>
-    </div>
-    </div>
-</div>
-
-   <div id="class-modal" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-        <div class="glass-panel rounded-2xl w-full max-w-sm md:max-w-md p-5 md:p-6 relative shadow-2xl">
-            <button onclick="closeStatsModal()" class="absolute top-3 right-3 md:top-4 md:right-4 text-slate-500 hover:text-slate-800 dark:hover:text-white p-2 text-xl transition-colors">✖</button>
-            <h3 id="modal-title" class="text-lg md:text-xl font-bold mb-4 text-slate-900 dark:text-white">{{ t.modal_stats }}</h3>
-            <div id="class-stats-list" class="flex flex-col max-h-[60vh] overflow-y-auto pr-1"></div>
-        </div>
-    </div>
-
-    <div id="toast-container" class="fixed bottom-20 md:bottom-5 right-4 md:right-5 z-50 flex flex-col gap-2 w-[calc(100%-2rem)] md:w-auto md:max-w-xs pointer-events-none"></div>
-
-    <script>
-        const I18N = {{ i18n_obj | tojson }};
-        const allUsers = {{ users_json | safe }};
-        const classOptions = {{ class_options | tojson }};
-    </script>
-    <script>
-{% raw %}
-        window.classStats = {};
-
-        function showToast(name, status, isLate) {
-            const toast = document.createElement('div');
-            const bgClass = isLate ? 'bg-rose-500' : 'bg-emerald-500';
-            const icon = isLate ? '⚠️' : '✅';
-            toast.className = `toast-enter pointer-events-auto glass-panel flex items-center w-full p-3 md:p-4 text-slate-900 dark:text-white rounded-xl md:rounded-2xl shadow-xl border-l-4 ${isLate ? 'border-amber-500' : 'border-emerald-500'}`;
-            toast.innerHTML = `
-                <div class="inline-flex items-center justify-center shrink-0 w-8 h-8 rounded-full ${bgClass} text-white shadow-inner text-sm">${icon}</div>
-                <div class="ml-3 font-normal overflow-hidden">
-                    <span class="mb-0.5 text-xs md:text-sm font-bold block truncate">${name}</span>
-                    <div class="text-[10px] md:text-xs text-slate-500 dark:text-slate-400 truncate">${status}</div>
-                </div>
-            `;
-            const container = document.getElementById('toast-container');
-            container.appendChild(toast);
-            setTimeout(() => {
-                toast.classList.replace('toast-enter', 'toast-exit');
-                setTimeout(() => toast.remove(), 300);
-            }, 4000);
-        }
-
-        let isEditing = false;
-        let hiddenLogs = JSON.parse(localStorage.getItem('hiddenLogs') || '[]');
-        let lastKnownLogId = 0;
-
-        document.getElementById('logs-body').addEventListener('focusin', (e) => { if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') isEditing = true; });
-        document.getElementById('logs-body').addEventListener('focusout', (e) => { if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') isEditing = false; });
-
-        function hideLog(logId) { hiddenLogs.push(logId); localStorage.setItem('hiddenLogs', JSON.stringify(hiddenLogs)); fetchLogs(); }
-        function clearHiddenLogs() { hiddenLogs = []; localStorage.removeItem('hiddenLogs'); fetchLogs(); }
-
-        function openStatsModal(type) {
-            document.getElementById('class-modal').classList.remove('hidden');
-            const listContainer = document.getElementById('class-stats-list');
-            const titleElement = document.getElementById('modal-title');
-            const cu = I18N.class_unassigned;
-            let sortedClasses = Object.keys(window.classStats).sort((a,b) => a === cu ? 1 : b === cu ? -1 : a.localeCompare(b));
-
-            if(type === 'present') titleElement.innerText = I18N.modal_present;
-            else if(type === 'ontime') titleElement.innerText = I18N.modal_ontime;
-            else if(type === 'late') titleElement.innerText = I18N.modal_late;
-
-            let listHTML = '';
-
-            sortedClasses.forEach(c => {
-                let stats = window.classStats[c];
-                if (stats.all.length === 0) return;
-
-                let targetCount = 0;
-                let summaryBadge = '';
-
-                if (type === 'present') {
-                    targetCount = stats.present.length;
-                    summaryBadge = `<span class="bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300 text-[10px] font-bold px-2 py-0.5 rounded-full">${targetCount} / ${stats.all.length}</span>`;
-                } else if (type === 'ontime') {
-                    targetCount = stats.onTime.length;
-                    if(targetCount === 0) return;
-                    summaryBadge = `<span class="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300 text-[10px] font-bold px-2 py-0.5 rounded-full">${targetCount} ${I18N.modal_students_unit}</span>`;
-                } else if (type === 'late') {
-                    targetCount = stats.late.length;
-                    if(targetCount === 0) return;
-                    summaryBadge = `<span class="bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 text-[10px] font-bold px-2 py-0.5 rounded-full">${targetCount} ${I18N.modal_students_unit}</span>`;
-                }
-
-                let detailsHTML = '';
-                if (type === 'present') {
-                    detailsHTML += `<p class="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 mb-1">✅ ${I18N.modal_present_list}</p>`;
-                    if(stats.present.length === 0) detailsHTML += `<p class="text-[10px] text-slate-500 ml-2 mb-2">${I18N.modal_none}</p>`;
-                    stats.present.forEach(u => detailsHTML += `<p class="text-xs text-slate-700 dark:text-slate-300 ml-2 py-0.5">${u.name}</p>`);
-
-                    detailsHTML += `<p class="text-[10px] font-bold text-rose-500 dark:text-rose-400 mt-3 mb-1">❌ ${I18N.modal_absent_list}</p>`;
-                    if(stats.absent.length === 0) detailsHTML += `<p class="text-[10px] text-slate-500 ml-2">${I18N.modal_none}</p>`;
-                    stats.absent.forEach(u => detailsHTML += `<p class="text-xs text-slate-700 dark:text-slate-300 ml-2 py-0.5">${u.name}</p>`);
-                } else {
-                    let colorClass = type === 'late' ? 'text-amber-500' : 'text-emerald-500';
-                    let targetList = type === 'late' ? stats.late : stats.onTime;
-                    targetList.forEach(u => detailsHTML += `<p class="text-xs text-slate-700 dark:text-slate-300 ml-2 py-0.5"><span class="${colorClass} mr-1.5">•</span>${u.name}</p>`);
-                }
-
-                listHTML += `
-                <details class="group bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700 mb-2 overflow-hidden">
-                    <summary class="flex justify-between items-center p-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
-                        <span class="font-semibold text-sm text-slate-800 dark:text-slate-200 flex items-center gap-2">
-                            <svg class="w-4 h-4 text-slate-400 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
-                            ${c}
-                        </span>
-                        ${summaryBadge}
-                    </summary>
-                    <div class="px-4 pb-3 pt-1 border-t border-slate-200/50 dark:border-slate-700/50 bg-white dark:bg-slate-900/50">
-                        ${detailsHTML}
-                    </div>
-                </details>`;
-            });
-
-            if (listHTML === '') listHTML = '<p class="text-slate-500 text-sm text-center py-4">' + I18N.modal_no_data + '</p>';
-            listContainer.innerHTML = listHTML;
-        }
-
-        function closeStatsModal() { document.getElementById('class-modal').classList.add('hidden'); }
-
-        function purgeUnknownLogs() {
-            if (!confirm('Видалити записи без зареєстрованого учня?')) return;
-            fetch('/api/purge_unknown_logs', { method: 'POST' })
-                .then(r => r.json())
-                .then(d => { alert('Видалено: ' + (d.deleted || 0)); fetchLogs(); })
-                .catch(() => alert('Помилка очищення'));
-        }
-
-        function fetchLogs() {
-            if (isEditing) return;
-            fetch('/api/logs_json').then(res => {
-                if (res.status === 401) { window.location.reload(); return null; }
-                return res.json();
-            }).then(data => {
-                if (!data) return;
-
-                if (data.length > 0) {
-                    const currentMaxId = Math.max(...data.map(l => l.id));
-                    if (lastKnownLogId > 0 && currentMaxId > lastKnownLogId) {
-                        const newLogs = data.filter(l => l.id > lastKnownLogId);
-                        newLogs.reverse().forEach(log => {
-                            const st = log.status.toLowerCase();
-                            const isLate = st.includes(I18N.match_late) || st.includes(I18N.match_anomaly);
-                            const unk = I18N.toast_unknown + ' (' + log.uid + ')';
-                            showToast(log.name || unk, log.status, isLate);
-                        });
-                    }
-                    lastKnownLogId = currentMaxId;
-                }
-
-                let firstScanToday = {};
-                const todayStr = new Date().toISOString().split('T')[0];
-
-                data.forEach(log => {
-                    if (log.scan_time.startsWith(todayStr)) {
-                        firstScanToday[log.uid] = log.status;
-                    }
-                });
-
-                let presentUIDs = new Set();
-                let onTimeUIDs = new Set();
-                let lateUIDs = new Set();
-
-                Object.entries(firstScanToday).forEach(([uid, status]) => {
-                    presentUIDs.add(uid);
-                    const sl = status.toLowerCase();
-                    if (sl.includes(I18N.match_late)) lateUIDs.add(uid);
-                    else if (sl.includes(I18N.match_allowed)) onTimeUIDs.add(uid);
-                });
-
-                window.classStats = {};
-                allUsers.forEach(u => {
-                    let cg = u.class_group || I18N.class_unassigned;
-                    if (!window.classStats[cg]) window.classStats[cg] = { all: [], present: [], absent: [], onTime: [], late: [] };
-
-                    window.classStats[cg].all.push(u);
-                    if (presentUIDs.has(u.uid)) window.classStats[cg].present.push(u);
-                    else window.classStats[cg].absent.push(u);
-
-                    if (onTimeUIDs.has(u.uid)) window.classStats[cg].onTime.push(u);
-                    if (lateUIDs.has(u.uid)) window.classStats[cg].late.push(u);
-                });
-
-                document.getElementById('stat-total').innerText = presentUIDs.size;
-                document.getElementById('stat-ontime').innerText = onTimeUIDs.size;
-                document.getElementById('stat-late').innerText = lateUIDs.size;
-
-                const tbody = document.getElementById('logs-body');
-                tbody.innerHTML = '';
-
-                let limit = 0;
-                data.forEach(log => {
-                    if (hiddenLogs.includes(log.id) || limit >= 100) return;
-                    limit++;
-
-                    let statusLower = log.status.toLowerCase();
-                    let statusBadge = '';
-                    const sea = I18N.status_entry_allowed;
-                    const sar = I18N.status_anomaly_reentry;
-                    const slp = I18N.status_late_prefix;
-                    if (statusLower.includes(I18N.match_allowed)) {
-                        statusBadge = `<span class="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-2 py-1 md:px-3 md:py-1.5 rounded-lg md:rounded-xl text-[10px] md:text-xs font-bold border border-emerald-500/20"><span class="mr-1 hidden md:inline">✅</span>${log.status.replace(sea, I18N.badge_in)}</span>`;
-                    } else if (statusLower.includes(I18N.match_anomaly)) {
-                        statusBadge = `<span class="bg-rose-500/10 text-rose-600 dark:text-rose-400 px-2 py-1 md:px-3 md:py-1.5 rounded-lg md:rounded-xl text-[10px] md:text-xs font-bold border border-rose-500/20"><span class="mr-1 hidden md:inline">🚫</span>${log.status.replace(sar, I18N.badge_reentry)}</span>`;
-                    } else if (statusLower.includes(I18N.match_late)) {
-                        statusBadge = `<span class="bg-rose-500/10 text-rose-600 dark:text-rose-400 px-2 py-1 md:px-3 md:py-1.5 rounded-lg md:rounded-xl text-[10px] md:text-xs font-bold border border-rose-500/20"><span class="mr-1 hidden md:inline">🔴</span>${log.status.replace(slp, I18N.badge_late)}</span>`;
-                    } else if (statusLower.includes(I18N.match_sick) || statusLower.includes(I18N.match_released)) {
-                        statusBadge = `<span class="bg-blue-500/10 text-blue-600 dark:text-blue-400 px-2 py-1 md:px-3 md:py-1.5 rounded-lg md:rounded-xl text-[10px] md:text-xs font-bold border border-blue-500/20"><span class="mr-1 hidden md:inline">ℹ️</span>${log.status}</span>`;
-                    } else {
-                        statusBadge = `<span class="bg-slate-500/10 text-slate-600 dark:text-slate-400 px-2 py-1 md:px-3 md:py-1.5 rounded-lg md:rounded-xl text-[10px] md:text-xs font-bold border border-slate-500/20"><span class="mr-1 hidden md:inline">🕒</span>${log.status}</span>`;
-                    }
-
-                    let classBadge = log.class_group && log.class_group !== I18N.class_unassigned ?
-                        `<span class="bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 px-1.5 py-0.5 rounded text-[10px] font-bold ml-2 shrink-0">${log.class_group}</span>` : '';
-
-                    let nameHtml = log.name ?
-                        `<div class="flex items-center w-28 md:w-auto"><div class="font-semibold text-slate-900 dark:text-white text-xs md:text-sm truncate">${log.name}</div>${classBadge}</div><div class="text-[9px] md:text-xs text-slate-500 font-mono mt-0.5">${log.uid}</div>` :
-                        `<form action="/api/add_user" method="POST" class="flex flex-col md:flex-row md:items-center gap-1 md:gap-2">
-                            <input type="hidden" name="uid" value="${log.uid}">
-                            <input type="text" name="name" placeholder="${I18N.ph_name_quick}" required class="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 text-[10px] md:text-xs rounded px-2 py-1 outline-none w-full md:w-24">
-                            <select name="class_group" class="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 text-[10px] md:text-xs rounded px-1 py-1 outline-none">${classOptions}</select>
-                            <button type="submit" class="text-white bg-blue-600 rounded text-[10px] md:text-xs px-2 py-1">${I18N.btn_ok}</button>
-                         </form>`;
-
-                    let tr = `
-                    <tr class="border-b border-slate-200/60 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-800/80 transition-colors">
-                        <td class="px-3 py-3 md:px-6 md:py-4 whitespace-nowrap font-medium text-slate-900 dark:text-slate-200 text-xs md:text-sm">${log.scan_time.split(' ')[1]} <span class="text-[9px] md:text-xs text-slate-400 font-normal ml-1 block md:inline">${log.scan_time.split(' ')[0]}</span></td>
-                        <td class="hidden sm:table-cell px-3 py-3 md:px-6 md:py-4 text-slate-600 dark:text-slate-300 whitespace-nowrap text-xs md:text-sm">${log.room}</td>
-                        <td class="px-3 py-3 md:px-6 md:py-4 text-xs md:text-sm max-w-[140px] md:max-w-xs">${nameHtml}</td>
-                        <td class="px-3 py-3 md:px-6 md:py-4 whitespace-nowrap">${statusBadge}</td>
-                        <td class="px-2 py-3 md:px-6 md:py-4 text-center">
-                            <button onclick="hideLog(${log.id})" class="text-slate-400 hover:text-rose-500 p-2 text-lg leading-none" title="${I18N.btn_hide_title}">×</button>
-                        </td>
-                    </tr>`;
-                    tbody.innerHTML += tr;
-                });
-            });
-        }
-
-        fetchLogs();
-
-        const socket = io();
-        socket.on('refresh_logs', function() {
-            fetchLogs();
-        });
-{% endraw %}
-    </script>
-</body>
-</html>
-"""
-)
-
-# === Classes page ===
-CLASSES_HTML = (
-"""
-<!DOCTYPE html>
-<html lang="{{ t.html_lang }}" class="light">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>{{ t.page_title_classes }}</title>
-    {% raw %}
-    <script>
-        if (localStorage.getItem('color-theme') === 'dark' || (!('color-theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) { document.documentElement.classList.add('dark'); } else { document.documentElement.classList.remove('dark') }
-    </script>
-    {% endraw %}
-    <script src="https://cdn.tailwindcss.com"></script>
-    {% raw %}
-    <script>tailwind.config = { darkMode: 'class', theme: { extend: {} } }</script>
-    <style>
-       .glass-panel { background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.3); }
-       .dark .glass-panel { background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(255, 255, 255, 0.1); }
-       details > summary { list-style: none; }
-       details > summary::-webkit-details-marker { display: none; }
-    </style>
-    {% endraw %}
-</head>
-<body class="bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200 transition-colors duration-300 font-sans antialiased min-h-screen relative bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] pb-24 md:pb-12">
-"""
-+ NAV_HTML +
-"""
-    <div class="max-w-screen-md mx-auto pt-20 md:pt-24 px-3 md:px-4">
-        <div class="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-6">
-            <h2 class="text-xl md:text-2xl font-bold text-slate-900 dark:text-white">{{ t.classes_heading }}</h2>
-            <div class="relative w-full md:w-64">
-                <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-                    <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-                </div>
-                <input type="text" id="searchInput" onkeyup="filterStudents()" placeholder="{{ t.search_placeholder }}" class="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-sm rounded-xl pl-10 pr-4 py-2 outline-none w-full dark:text-white shadow-sm focus:ring-2 focus:ring-blue-500">
-            </div>
-        </div>
-
-        <div class="flex flex-col gap-3">
-            {% for class_name, students in grouped_users.items() %}
-            <details class="glass-panel rounded-xl shadow-md group">
-                <summary class="text-base md:text-lg font-bold p-4 text-slate-900 dark:text-white cursor-pointer flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/30 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
-                    <div class="flex items-center gap-3">
-                        {{ class_name }}
-                        <span class="bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300 text-xs px-2 py-0.5 rounded-full font-semibold">{{ students|length }} {{ t.students_count }}</span>
-                    </div>
-                    <svg class="w-5 h-5 text-slate-400 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-                </summary>
-                <div class="flex flex-col px-2 md:px-4 pb-2 border-t border-slate-200/50 dark:border-slate-700/50">
-                    {% for student in students %}
-                    <div class="student-row flex flex-col md:flex-row md:items-center justify-between py-3 border-b border-slate-100 dark:border-slate-800 last:border-0" data-name="{{ student.name|lower }}">
-                        <div class="mb-2 md:mb-0 flex items-baseline gap-2 px-2">
-                            <span class="font-medium text-slate-800 dark:text-slate-200 text-sm">{{ student.name }}</span>
-                            <span class="text-[10px] text-slate-400 font-mono">{{ student.uid }}</span>
-                        </div>
-                        <form action="/api/set_excuse" method="POST" class="flex gap-2 px-2 md:px-0">
-                            <input type="hidden" name="uid" value="{{ student.uid }}">
-                            <button type="submit" name="excuse" value="{{ canon.excuse_sick }}" class="flex-1 md:flex-none text-amber-700 bg-amber-100 active:scale-95 hover:bg-amber-200 dark:text-amber-400 dark:bg-amber-900/40 font-medium rounded-lg text-xs px-3 py-1.5 transition-colors border border-amber-200 dark:border-amber-800/50 shadow-sm flex justify-center items-center gap-1.5">
-                                🏥 <span class="md:inline">{{ t.btn_sick_label }}</span>
-                            </button>
-                            <button type="submit" name="excuse" value="{{ canon.excuse_released }}" class="flex-1 md:flex-none text-blue-700 bg-blue-100 active:scale-95 hover:bg-blue-200 dark:text-blue-400 dark:bg-blue-900/40 font-medium rounded-lg text-xs px-3 py-1.5 transition-colors border border-blue-200 dark:border-blue-800/50 shadow-sm flex justify-center items-center gap-1.5">
-                                ✈️ <span class="md:inline">{{ t.btn_released_label }}</span>
-                            </button>
-                        </form>
-                    </div>
-                    {% endfor %}
-                </div>
-            </details>
-            {% endfor %}
-        </div>
-    </div>
-
-    <script>
-{% raw %}
-        function filterStudents() {
-            const term = document.getElementById('searchInput').value.toLowerCase();
-            const detailsElements = document.querySelectorAll('details');
-            document.querySelectorAll('.student-row').forEach(row => {
-                const name = row.getAttribute('data-name');
-                if(name.includes(term)) { row.style.display = ''; }
-                else { row.style.display = 'none'; }
-            });
-            detailsElements.forEach(detail => {
-                if (term.length > 0) { detail.setAttribute('open', ''); }
-                else { detail.removeAttribute('open'); }
-            });
-        }
-{% endraw %}
-    </script>
-</body>
-</html>
-"""
-)
-
-# === Stats page ===
-STATS_HTML = (
-"""
-<!DOCTYPE html>
-<html lang="{{ t.html_lang }}" class="light">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>{{ t.page_title_stats }}</title>
-    {% raw %}
-    <script>
-        if (localStorage.getItem('color-theme') === 'dark' || (!('color-theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) { document.documentElement.classList.add('dark'); } else { document.documentElement.classList.remove('dark') }
-    </script>
-    {% endraw %}
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    {% raw %}
-    <script>tailwind.config = { darkMode: 'class', theme: { extend: {} } }</script>
-    <style>
-       .glass-panel { background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.3); }
-       .dark .glass-panel { background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(255, 255, 255, 0.1); }
-    </style>
-    {% endraw %}
-</head>
-<body class="bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200 transition-colors duration-300 font-sans antialiased min-h-screen relative bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] pb-24 md:pb-12">
-"""
-+ NAV_HTML +
-"""
-    <div class="max-w-screen-xl mx-auto pt-20 md:pt-24 px-3 md:px-4">
-        <div class="glass-panel rounded-xl md:rounded-2xl shadow-lg p-4 md:p-6 mb-4 md:mb-6">
-            <form action="/stats" method="GET" class="flex flex-col md:flex-row md:items-center gap-3 md:gap-4">
-                <div class="flex items-center gap-2 w-full md:w-auto">
-                    <input type="date" name="start_date" value="{{ start_date }}" class="bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white text-sm rounded-xl px-3 py-2 outline-none flex-1">
-                    <span class="text-slate-500">—</span>
-                    <input type="date" name="end_date" value="{{ end_date }}" class="bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white text-sm rounded-xl px-3 py-2 outline-none flex-1">
-                </div>
-                <button type="submit" class="w-full md:w-auto text-white bg-blue-600 hover:bg-blue-700 font-medium rounded-xl text-sm px-6 py-2 shadow-md active:scale-95 transition-transform">{{ t.stats_filter }}</button>
-            </form>
-        </div>
-
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-6 mb-4 md:mb-6">
-            <div class="glass-panel rounded-xl p-4 shadow-md text-center">
-                <p class="text-[10px] md:text-sm font-medium text-slate-500">{{ t.stats_total_logs }}</p>
-                <p class="text-xl md:text-3xl font-bold text-slate-800 dark:text-white">{{ total_logs }}</p>
-            </div>
-            <div class="glass-panel rounded-xl p-4 shadow-md text-center">
-                <p class="text-[10px] md:text-sm font-medium text-slate-500">{{ t.stats_punctuality }}</p>
-                <p class="text-xl md:text-3xl font-bold text-slate-800 dark:text-white">{{ punctuality }}%</p>
-            </div>
-            <div class="glass-panel rounded-xl p-4 shadow-md text-center">
-                <p class="text-[10px] md:text-sm font-medium text-slate-500">{{ t.stats_late }}</p>
-                <p class="text-xl md:text-3xl font-bold text-slate-800 dark:text-white">{{ late }}</p>
-            </div>
-            <div class="glass-panel rounded-xl p-4 shadow-md text-center">
-                <p class="text-[10px] md:text-sm font-medium text-slate-500">{{ t.stats_excused_short }}</p>
-                <p class="text-xl md:text-3xl font-bold text-slate-800 dark:text-white">{{ excused }}</p>
-            </div>
-        </div>
-
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
-            <div class="glass-panel rounded-xl md:rounded-2xl shadow-lg p-4 md:p-6 lg:col-span-1">
-                <h2 class="text-base md:text-lg font-bold mb-2 md:mb-4 text-slate-900 dark:text-white text-center">{{ t.stats_chart_discipline }}</h2>
-                <div class="relative h-48 md:h-64 w-full flex justify-center">
-                    <canvas id="ratioChart"></canvas>
-                </div>
-            </div>
-            <div class="glass-panel rounded-xl md:rounded-2xl shadow-lg p-4 md:p-6 lg:col-span-2">
-                <h2 class="text-base md:text-lg font-bold mb-2 md:mb-4 text-slate-900 dark:text-white text-center">{{ t.stats_chart_late_by_class }}</h2>
-                <div class="relative h-48 md:h-64 w-full flex justify-center">
-                    <canvas id="lateClassChart"></canvas>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        const chartLateLabel = {{ chart_late_label | safe }};
-        const ratioLabels = {{ chart_labels_ratio | safe }};
-        const labels = {{ labels | safe }};
-        const dataArr = {{ data | safe }};
-        const onTimeCount = {{ on_time }};
-        const lateCount = {{ late }};
-{% raw %}
-        const isDark = document.documentElement.classList.contains('dark');
-        const chartColors = {
-            light: { text: '#475569', grid: '#e2e8f0' },
-            dark: { text: '#cbd5e1', grid: '#334155' }
-        };
-
-        const ctxBar = document.getElementById('lateClassChart').getContext('2d');
-        let lateChart = new Chart(ctxBar, {
-            type: 'bar',
-            data: {
-                labels: labels,
-                datasets: [{
-                    label: chartLateLabel,
-                    data: dataArr,
-                    backgroundColor: 'rgba(245, 158, 11, 0.8)',
-                    borderRadius: 4
-                }]
-            },
-            options: {
-                responsive: true, maintainAspectRatio: false,
-                plugins: { legend: { display: false } },
-                scales: {
-                    y: { beginAtZero: true, ticks: { stepSize: 1, color: isDark ? chartColors.dark.text : chartColors.light.text }, grid: { color: isDark ? chartColors.dark.grid : chartColors.light.grid } },
-                    x: { ticks: { color: isDark ? chartColors.dark.text : chartColors.light.text, font: {size: 10} }, grid: { display: false } }
-                }
-            }
-        });
-
-        const ctxDoughnut = document.getElementById('ratioChart').getContext('2d');
-        let ratioChart = new Chart(ctxDoughnut, {
-            type: 'doughnut',
-            data: {
-                labels: ratioLabels,
-                datasets: [{
-                    data: [onTimeCount, lateCount],
-                    backgroundColor: ['#10b981', '#f59e0b'],
-                    borderWidth: 0,
-                    cutout: '70%'
-                }]
-            },
-            options: {
-                responsive: true, maintainAspectRatio: false,
-                plugins: { legend: { position: 'bottom', labels: { color: isDark ? chartColors.dark.text : chartColors.light.text, font: {size: 10} } } }
-            }
-        });
-
-        function updateChartTheme(theme) {
-            lateChart.options.scales.x.ticks.color = chartColors[theme].text;
-            lateChart.options.scales.y.ticks.color = chartColors[theme].text;
-            lateChart.options.scales.y.grid.color = chartColors[theme].grid;
-            lateChart.update();
-            ratioChart.options.plugins.legend.labels.color = chartColors[theme].text;
-            ratioChart.update();
-        }
-{% endraw %}
-    </script>
-</body>
-</html>
-"""
-)
-# === Settings page ===
-SETTINGS_HTML = (
-"""
-<!DOCTYPE html>
-<html lang="{{ t.html_lang }}" class="light">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>{{ t.page_title_settings }}</title>
-    {% raw %}
-    <script>if (localStorage.getItem('color-theme') === 'dark' || (!('color-theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) { document.documentElement.classList.add('dark'); } else { document.documentElement.classList.remove('dark') }</script>
-    {% endraw %}
-    <script src="https://cdn.tailwindcss.com"></script>
-    {% raw %}
-    <script>tailwind.config = { darkMode: 'class', theme: { extend: {} } }</script>
-    <style>
-       .glass-panel { background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.3); }
-       .dark .glass-panel { background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(255, 255, 255, 0.1); }
-    </style>
-    {% endraw %}
-</head>
-<body class="bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200 transition-colors duration-300 font-sans antialiased min-h-screen relative bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] pb-24 md:pb-12">
-"""
-+ NAV_HTML +
-"""
-    <div class="max-w-screen-md mx-auto pt-20 md:pt-24 px-3 md:px-4">
-        <h2 class="text-xl md:text-2xl font-bold text-slate-900 dark:text-white mb-6 flex items-center gap-2">
-            ⚙️ {{ t.settings_heading }}
-        </h2>
-
-        {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-        <div class="mb-6 space-y-2">
-            {% for category, message in messages %}
-            <div role="alert" class="rounded-xl px-4 py-3 text-sm font-medium border
-                {% if category == 'error' %}border-rose-300 bg-rose-50 text-rose-900 dark:border-rose-700 dark:bg-rose-950/50 dark:text-rose-100
-                {% elif category == 'success' %}border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-100
-                {% else %}border-blue-200 bg-blue-50 text-blue-900 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-100{% endif %}">{{ message }}</div>
-            {% endfor %}
-        </div>
-        {% endif %}
-        {% endwith %}
-
-        <div class="glass-panel rounded-xl md:rounded-2xl shadow-lg p-6 mb-6">
-            <h3 class="text-lg font-bold mb-4 text-slate-900 dark:text-white border-b border-slate-200 dark:border-slate-700 pb-2">⏰ {{ t.settings_bell_title }}</h3>
-            <form action="/api/update_schedule" method="POST" class="flex flex-col gap-4">
-                <div>
-                    <label class="text-sm font-semibold text-slate-500 uppercase block mb-2">{{ t.settings_first_lesson_label }}</label>
-                    <input type="time" name="lesson_start" value="{{ lesson_start }}" required class="bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-900 text-lg rounded-xl px-4 py-3 dark:text-white outline-none w-full max-w-xs font-mono focus:ring-2 focus:ring-blue-500 transition-all">
-                </div>
-                <button type="submit" class="w-full max-w-xs text-white bg-blue-600 hover:bg-blue-700 font-medium rounded-xl text-sm px-5 py-3 shadow-md active:scale-95 transition-transform">
-                    {{ t.settings_save }}
-                </button>
-            </form>
-        </div>
-
-        <div class="glass-panel rounded-xl md:rounded-2xl shadow-lg p-6 mb-6">
-            <h3 class="text-lg font-bold mb-2 text-slate-900 dark:text-white border-b border-slate-200 dark:border-slate-700 pb-2">📚 {{ t.settings_promote_title }}</h3>
-            <p class="text-sm text-slate-600 dark:text-slate-400 mb-4">{{ t.settings_promote_desc }}</p>
-            <form action="/api/promote_class" method="POST" class="flex flex-col gap-4">
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                        <label class="text-sm font-semibold text-slate-500 uppercase block mb-2">{{ t.settings_promote_from }}</label>
-                        <select name="from_class" required class="bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white text-sm rounded-xl px-3 py-2 outline-none w-full">
-                            {% for c in classes %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
-                        </select>
-                    </div>
-                    <div>
-                        <label class="text-sm font-semibold text-slate-500 uppercase block mb-2">{{ t.settings_promote_to }}</label>
-                        <select name="to_class" required class="bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white text-sm rounded-xl px-3 py-2 outline-none w-full">
-                            {% for c in classes %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
-                        </select>
-                    </div>
-                </div>
-                <label class="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
-                    <input type="checkbox" name="confirm" value="1" required class="mt-1 rounded border-slate-300 dark:border-slate-600">
-                    <span>{{ t.settings_promote_confirm_label }}</span>
-                </label>
-                <button type="submit" class="w-full sm:w-auto text-white bg-amber-600 hover:bg-amber-700 font-medium rounded-xl text-sm px-5 py-3 shadow-md active:scale-95 transition-transform">
-                    {{ t.settings_promote_submit }}
-                </button>
-            </form>
-        </div>
-
-    </div>
-</body>
-</html>
-"""
-)
-
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
@@ -916,6 +177,15 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS settings (setting_name TEXT PRIMARY KEY, setting_value TEXT)''')
     c.execute('''INSERT OR IGNORE INTO settings (setting_name, setting_value) VALUES ('lesson_start', '08:30')''')
     # ==============================
+
+    # === RBAC ===
+    c.execute('''CREATE TABLE IF NOT EXISTS web_users (username TEXT PRIMARY KEY, password_hash TEXT NOT NULL, role TEXT NOT NULL, display_name TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS teacher_classes (username TEXT NOT NULL, class_group TEXT NOT NULL, PRIMARY KEY(username, class_group))''')
+    
+    # Create default admin if not exists
+    admin_pw = generate_password_hash(ADMIN_PASS)
+    c.execute("INSERT OR IGNORE INTO web_users (username, password_hash, role, display_name) VALUES (?, ?, 'admin', 'Адміністратор')", (ADMIN_LOGIN, admin_pw))
+    # ============
 
     c.execute('''CREATE TABLE IF NOT EXISTS google_users (
         google_id TEXT PRIMARY KEY,
@@ -1103,11 +373,89 @@ def requires_mobile_auth(f):
     return decorated
 
 
+LOGIN_HTML = """
+<!DOCTYPE html>
+<html lang="uk" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Вхід — Smart School</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+       .glass-panel { background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.3); }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans antialiased min-h-screen flex items-center justify-center relative bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] px-4">
+    <div class="glass-panel w-full max-w-md rounded-2xl shadow-xl p-6 md:p-8">
+        <div class="flex justify-center mb-6">
+            <div class="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-sm">
+                <img src="/static/logo.png" alt="Logo" class="w-12 h-12 object-contain">
+            </div>
+        </div>
+        <h2 class="text-2xl font-bold text-center text-slate-900 mb-6">Smart<span class="text-blue-600">School</span> Panel</h2>
+        
+        {% with messages = get_flashed_messages() %}
+        {% if messages %}
+        <div class="mb-4">
+            {% for message in messages %}
+            <div class="bg-rose-100 border border-rose-400 text-rose-700 px-4 py-3 rounded relative text-sm" role="alert">{{ message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+
+        <form action="/login" method="POST" class="flex flex-col gap-4">
+            <div>
+                <label class="block text-sm font-medium text-slate-700 mb-1">Логін</label>
+                <input type="text" name="username" required class="w-full bg-slate-50 border border-slate-300 text-slate-900 rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-slate-700 mb-1">Пароль</label>
+                <input type="password" name="password" required class="w-full bg-slate-50 border border-slate-300 text-slate-900 rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <button type="submit" class="w-full text-white bg-blue-600 hover:bg-blue-700 font-medium rounded-xl px-5 py-3 mt-2 shadow-md active:scale-95 transition-transform">Увійти</button>
+        </form>
+    </div>
+</body>
+</html>
+"""
+
+@app.route('/login', methods=['GET', 'POST'])
+def login_page():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        conn = get_db_connection()
+        user = conn.execute('SELECT * FROM web_users WHERE username = ?', (username,)).fetchone()
+        conn.close()
+        
+        if user and check_password_hash(user['password_hash'], password):
+            session['web_user'] = username
+            return redirect(url_for('index'))
+        else:
+            flash('Неправильний логін або пароль')
+    
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    session.pop('web_user', None)
+    return redirect(url_for('login_page'))
+
+
 @app.route('/')
 @requires_auth
 def index():
     conn = get_db_connection()
-    users_raw = conn.execute('SELECT * FROM users ORDER BY class_group, name').fetchall()
+    if g.web_user['role'] == 'admin':
+        users_raw = conn.execute('SELECT * FROM users ORDER BY class_group, name').fetchall()
+    else:
+        classes = g.web_user['classes']
+        if not classes:
+            users_raw = []
+        else:
+            placeholders = ','.join('?' * len(classes))
+            users_raw = conn.execute(f'SELECT * FROM users WHERE class_group IN ({placeholders}) ORDER BY class_group, name', classes).fetchall()
     
     # Отримуємо поточний розклад із бази. Якщо його ще немає - ставимо 08:30
     setting = conn.execute("SELECT setting_value FROM settings WHERE setting_name = 'lesson_start'").fetchone()
@@ -1117,8 +465,8 @@ def index():
     users_json = json.dumps([dict(u) for u in users_raw]) 
     
     class_options = ''.join(f'<option value="{c}">{c}</option>' for c in CLASSES)
-    return render_template_string(
-        HTML_PAGE,
+    return render_template(
+        'index.html',
         users_json=users_json,
         classes=CLASSES,
         lesson_start=lesson_start,
@@ -1131,7 +479,15 @@ def index():
 @requires_auth
 def classes_page():
     conn = get_db_connection()
-    users = conn.execute('SELECT * FROM users ORDER BY class_group, name').fetchall()
+    if g.web_user['role'] == 'admin':
+        users = conn.execute('SELECT * FROM users ORDER BY class_group, name').fetchall()
+    else:
+        classes = g.web_user['classes']
+        if not classes:
+            users = []
+        else:
+            placeholders = ','.join('?' * len(classes))
+            users = conn.execute(f'SELECT * FROM users WHERE class_group IN ({placeholders}) ORDER BY class_group, name', classes).fetchall()
     conn.close()
     
     grouped_users = {}
@@ -1144,7 +500,7 @@ def classes_page():
     cu = CANONICAL['class_unassigned']
     sorted_groups = {k: grouped_users[k] for k in sorted(grouped_users.keys(), key=lambda x: (x != cu, x))}
 
-    return render_template_string(CLASSES_HTML, grouped_users=sorted_groups, t=t_dict(), canon=CANONICAL)
+    return render_template('classes.html', grouped_users=sorted_groups, t=t_dict(), canon=CANONICAL)
 
 @app.route('/api/set_excuse', methods=['POST'])
 @requires_auth
@@ -1153,6 +509,12 @@ def set_excuse():
     excuse = request.form.get('excuse')
     if uid and excuse:
         conn = get_db_connection()
+        if g.web_user['role'] == 'teacher':
+            user = conn.execute("SELECT class_group FROM users WHERE uid = ?", (uid,)).fetchone()
+            if not user or user['class_group'] not in g.web_user['classes']:
+                conn.close()
+                flash('Доступ заборонено', 'error')
+                return redirect(url_for('classes_page'))
         conn.execute('INSERT INTO logs (uid, room, status) VALUES (?, ?, ?)', (uid, CANONICAL['room_system'], excuse))
         conn.commit()
         conn.close()
@@ -1177,19 +539,40 @@ def stats():
     sick = CANONICAL['excuse_sick']
     rel = CANONICAL['excuse_released']
 
-    late_stats = conn.execute(f'''
-        SELECT COALESCE(users.class_group, ?) as class_group, COUNT(logs.id) as late_count 
-        FROM logs 
-        LEFT JOIN users ON logs.uid = users.uid 
-        WHERE logs.status LIKE ? AND logs.scan_time BETWEEN ? AND ?
-        GROUP BY class_group 
-        ORDER BY late_count DESC
-    ''', (cu, late_like, start_time, end_time)).fetchall()
-    
-    total_logs = conn.execute('SELECT COUNT(*) as c FROM logs WHERE scan_time BETWEEN ? AND ?', (start_time, end_time)).fetchone()['c']
-    on_time = conn.execute("SELECT COUNT(*) as c FROM logs WHERE status LIKE ? AND scan_time BETWEEN ? AND ?", (allowed_like, start_time, end_time)).fetchone()['c']
-    late = conn.execute("SELECT COUNT(*) as c FROM logs WHERE status LIKE ? AND scan_time BETWEEN ? AND ?", (late_like, start_time, end_time)).fetchone()['c']
-    excused = conn.execute("SELECT COUNT(*) as c FROM logs WHERE (status = ? OR status = ?) AND scan_time BETWEEN ? AND ?", (sick, rel, start_time, end_time)).fetchone()['c']
+    if g.web_user['role'] == 'admin':
+        late_stats = conn.execute(f'''
+            SELECT COALESCE(users.class_group, ?) as class_group, COUNT(logs.id) as late_count 
+            FROM logs 
+            LEFT JOIN users ON logs.uid = users.uid 
+            WHERE logs.status LIKE ? AND logs.scan_time BETWEEN ? AND ?
+            GROUP BY class_group 
+            ORDER BY late_count DESC
+        ''', (cu, late_like, start_time, end_time)).fetchall()
+        
+        total_logs = conn.execute('SELECT COUNT(*) as c FROM logs WHERE scan_time BETWEEN ? AND ?', (start_time, end_time)).fetchone()['c']
+        on_time = conn.execute("SELECT COUNT(*) as c FROM logs WHERE status LIKE ? AND scan_time BETWEEN ? AND ?", (allowed_like, start_time, end_time)).fetchone()['c']
+        late = conn.execute("SELECT COUNT(*) as c FROM logs WHERE status LIKE ? AND scan_time BETWEEN ? AND ?", (late_like, start_time, end_time)).fetchone()['c']
+        excused = conn.execute("SELECT COUNT(*) as c FROM logs WHERE (status = ? OR status = ?) AND scan_time BETWEEN ? AND ?", (sick, rel, start_time, end_time)).fetchone()['c']
+    else:
+        classes = g.web_user['classes']
+        if not classes:
+            late_stats = []
+            total_logs = on_time = late = excused = 0
+        else:
+            placeholders = ','.join('?' * len(classes))
+            late_stats = conn.execute(f'''
+                SELECT users.class_group, COUNT(logs.id) as late_count 
+                FROM logs 
+                JOIN users ON logs.uid = users.uid 
+                WHERE logs.status LIKE ? AND logs.scan_time BETWEEN ? AND ? AND users.class_group IN ({placeholders})
+                GROUP BY class_group 
+                ORDER BY late_count DESC
+            ''', (late_like, start_time, end_time, *classes)).fetchall()
+            
+            total_logs = conn.execute(f'SELECT COUNT(*) as c FROM logs JOIN users ON logs.uid = users.uid WHERE logs.scan_time BETWEEN ? AND ? AND users.class_group IN ({placeholders})', (start_time, end_time, *classes)).fetchone()['c']
+            on_time = conn.execute(f"SELECT COUNT(*) as c FROM logs JOIN users ON logs.uid = users.uid WHERE logs.status LIKE ? AND logs.scan_time BETWEEN ? AND ? AND users.class_group IN ({placeholders})", (allowed_like, start_time, end_time, *classes)).fetchone()['c']
+            late = conn.execute(f"SELECT COUNT(*) as c FROM logs JOIN users ON logs.uid = users.uid WHERE logs.status LIKE ? AND logs.scan_time BETWEEN ? AND ? AND users.class_group IN ({placeholders})", (late_like, start_time, end_time, *classes)).fetchone()['c']
+            excused = conn.execute(f"SELECT COUNT(*) as c FROM logs JOIN users ON logs.uid = users.uid WHERE (logs.status = ? OR logs.status = ?) AND logs.scan_time BETWEEN ? AND ? AND users.class_group IN ({placeholders})", (sick, rel, start_time, end_time, *classes)).fetchone()['c']
     
     conn.close()
 
@@ -1200,8 +583,8 @@ def stats():
     labels = [row['class_group'] for row in late_stats]
     data = [row['late_count'] for row in late_stats]
 
-    return render_template_string(
-        STATS_HTML, 
+    return render_template(
+        'stats.html', 
         labels=json.dumps(labels), 
         data=json.dumps(data),
         start_date=start_date,
@@ -1359,8 +742,15 @@ def scan_card():
 @requires_auth
 def get_logs_json():
     conn = get_db_connection()
-    # Изменили LIMIT 100 на LIMIT 1000 для корректной статистики за день
-    logs = conn.execute('''SELECT logs.id, datetime(logs.scan_time, 'localtime') as scan_time, logs.uid, logs.room, logs.status, users.name, users.class_group FROM logs LEFT JOIN users ON logs.uid = users.uid ORDER BY logs.scan_time DESC LIMIT 1000''').fetchall()
+    if g.web_user['role'] == 'admin':
+        logs = conn.execute('''SELECT logs.id, datetime(logs.scan_time, 'localtime') as scan_time, logs.uid, logs.room, logs.status, users.name, users.class_group FROM logs LEFT JOIN users ON logs.uid = users.uid ORDER BY logs.scan_time DESC LIMIT 1000''').fetchall()
+    else:
+        classes = g.web_user['classes']
+        if not classes:
+            logs = []
+        else:
+            placeholders = ','.join('?' * len(classes))
+            logs = conn.execute(f'''SELECT logs.id, datetime(logs.scan_time, 'localtime') as scan_time, logs.uid, logs.room, logs.status, users.name, users.class_group FROM logs JOIN users ON logs.uid = users.uid WHERE users.class_group IN ({placeholders}) ORDER BY logs.scan_time DESC LIMIT 1000''', classes).fetchall()
     conn.close()
     return jsonify([dict(ix) for ix in logs])
 
@@ -1369,18 +759,34 @@ def get_logs_json():
 def export_csv():
     conn = get_db_connection()
     unk = gettext('csv_unknown_name')
-    logs = conn.execute(
-        '''
-        SELECT datetime(logs.scan_time, 'localtime') as col_date,
-               logs.room as col_room,
-               logs.uid as col_uid,
-               COALESCE(users.name, ?) as col_name,
-               COALESCE(users.class_group, '-') as col_class,
-               logs.status as col_status
-        FROM logs LEFT JOIN users ON logs.uid = users.uid ORDER BY logs.scan_time DESC
-        ''',
-        (unk,),
-    ).fetchall()
+    if g.web_user['role'] == 'admin':
+        logs = conn.execute(
+            '''
+            SELECT datetime(logs.scan_time, 'localtime') as col_date,
+                   logs.room as col_room,
+                   logs.uid as col_uid,
+                   COALESCE(users.name, ?) as col_name,
+                   COALESCE(users.class_group, '-') as col_class,
+                   logs.status as col_status
+            FROM logs LEFT JOIN users ON logs.uid = users.uid ORDER BY logs.scan_time DESC
+            ''',
+            (unk,),
+        ).fetchall()
+    else:
+        classes = g.web_user['classes']
+        if not classes:
+            logs = []
+        else:
+            placeholders = ','.join('?' * len(classes))
+            logs = conn.execute(f'''
+                SELECT datetime(logs.scan_time, 'localtime') as col_date,
+                       logs.room as col_room,
+                       logs.uid as col_uid,
+                       users.name as col_name,
+                       users.class_group as col_class,
+                       logs.status as col_status
+                FROM logs JOIN users ON logs.uid = users.uid WHERE users.class_group IN ({placeholders}) ORDER BY logs.scan_time DESC
+                ''', classes).fetchall()
     conn.close()
     si = io.StringIO()
     cw = csv.writer(si, dialect='excel', delimiter=';')
@@ -1399,7 +805,7 @@ def export_csv():
     return output
 
 @app.route('/api/update_schedule', methods=['POST'])
-@requires_auth
+@requires_admin
 def update_schedule():
     new_time = request.form.get('lesson_start')
     if new_time:
@@ -1413,7 +819,7 @@ def update_schedule():
 
 
 @app.route('/api/promote_class', methods=['POST'])
-@requires_auth
+@requires_admin
 def promote_class():
     if request.form.get('confirm') != '1':
         flash(gettext('promote_err_confirm'), 'error')
@@ -1445,12 +851,158 @@ def settings_page():
     conn = get_db_connection()
     setting = conn.execute("SELECT setting_value FROM settings WHERE setting_name = 'lesson_start'").fetchone()
     lesson_start = setting['setting_value'] if setting else "08:30"
+    
+    web_users_list = []
+    if g.web_user['role'] == 'admin':
+        wu_raw = conn.execute('SELECT * FROM web_users').fetchall()
+        for wu in wu_raw:
+            classes = [r['class_group'] for r in conn.execute('SELECT class_group FROM teacher_classes WHERE username = ?', (wu['username'],)).fetchall()]
+            web_users_list.append({
+                'username': wu['username'],
+                'display_name': wu['display_name'],
+                'role': wu['role'],
+                'classes': classes
+            })
+            
     conn.close()
     
-    return render_template_string(SETTINGS_HTML, lesson_start=lesson_start, t=t_dict(), classes=CLASSES)
+    return render_template('settings.html', lesson_start=lesson_start, t=t_dict(), classes=CLASSES, web_users_list=web_users_list)
  
-@app.route('/api/add_user', methods=['POST'])
+@app.route('/api/add_web_user', methods=['POST'])
+@requires_admin
+def add_web_user():
+    username = request.form.get('username', '').strip()
+    password = request.form.get('password', '').strip()
+    role = request.form.get('role', 'teacher').strip()
+    display_name = request.form.get('display_name', '').strip()
+    classes = request.form.getlist('classes')
+    
+    if not username or not password:
+        flash("Логін та пароль обов'язкові", 'error')
+        return redirect(url_for('settings_page'))
+        
+    pw_hash = generate_password_hash(password)
+    
+    conn = get_db_connection()
+    try:
+        conn.execute('INSERT INTO web_users (username, password_hash, role, display_name) VALUES (?, ?, ?, ?)', 
+                    (username, pw_hash, role, display_name))
+        for c in classes:
+            conn.execute('INSERT INTO teacher_classes (username, class_group) VALUES (?, ?)', (username, c))
+        conn.commit()
+        flash(f'Користувача {username} додано', 'success')
+    except Exception as e:
+        flash(f'Помилка створення користувача {username}', 'error')
+    finally:
+        conn.close()
+        
+    return redirect(url_for('settings_page'))
+
+@app.route('/api/delete_web_user/<username>')
+@requires_admin
+def delete_web_user(username):
+    if username == g.web_user['username']:
+        flash('Не можна видалити самого себе', 'error')
+        return redirect(url_for('settings_page'))
+        
+    conn = get_db_connection()
+    conn.execute('DELETE FROM web_users WHERE username = ?', (username,))
+    conn.execute('DELETE FROM teacher_classes WHERE username = ?', (username,))
+    conn.commit()
+    conn.close()
+    flash(f'Користувача {username} видалено', 'success')
+    return redirect(url_for('settings_page'))
+
+@app.route('/api/upload_students', methods=['POST'])
 @requires_auth
+def upload_students():
+    if 'file' not in request.files:
+        flash('Немає файлу', 'error')
+        return redirect(url_for('settings_page'))
+    file = request.files['file']
+    if file.filename == '':
+        flash('Файл не вибрано', 'error')
+        return redirect(url_for('settings_page'))
+    
+    if not file.filename.endswith('.xlsx'):
+        flash('Тільки .xlsx файли підтримуються', 'error')
+        return redirect(url_for('settings_page'))
+
+    try:
+        wb = openpyxl.load_workbook(file)
+        sheet = wb.active
+        
+        headers = {}
+        for col_idx, cell in enumerate(sheet[1]):
+            val = str(cell.value).strip().lower() if cell.value else ""
+            if "прізвище" in val or "фамилия" in val: headers['last'] = col_idx
+            elif "ім'я" in val or "имя" in val: headers['first'] = col_idx
+            elif "батькові" in val or "отчество" in val: headers['mid'] = col_idx
+            elif "піб" in val or "фіо" in val or "п.і.б" in val or "ф.и.о" in val: headers['full'] = col_idx
+            elif "клас" in val or "класс" in val: headers['class'] = col_idx
+
+        if 'class' not in headers:
+            flash('Колонка "Клас" не знайдена в першому рядку!', 'error')
+            return redirect(url_for('settings_page'))
+            
+        if 'full' not in headers and 'first' not in headers:
+            flash('Не знайдено колонки з ПІБ або Ім\'ям!', 'error')
+            return redirect(url_for('settings_page'))
+
+        conn = get_db_connection()
+        db_users = conn.execute("SELECT uid, name FROM users").fetchall()
+        
+        def normalize(name):
+            return " ".join(str(name).lower().split())
+            
+        name_to_uid = {normalize(u['name']): u['uid'] for u in db_users}
+        
+        updated = 0
+        skipped = 0
+
+        for row in sheet.iter_rows(min_row=2, values_only=True):
+            if not any(row): continue
+            
+            c_val = row[headers['class']]
+            if not c_val: continue
+            class_group = str(c_val).strip()
+            
+            full_name = ""
+            if 'full' in headers and row[headers['full']]:
+                full_name = str(row[headers['full']]).strip()
+            elif 'last' in headers and 'first' in headers:
+                last = str(row[headers['last']] or "").strip()
+                first = str(row[headers['first']] or "").strip()
+                mid = str(row[headers.get('mid')] or "").strip() if 'mid' in headers else ""
+                full_name = f"{last} {first} {mid}".strip()
+            
+            if not full_name:
+                continue
+                
+            norm_name = normalize(full_name)
+            
+            if g.web_user['role'] == 'teacher' and class_group not in g.web_user['classes']:
+                skipped += 1
+                continue
+                
+            if norm_name in name_to_uid:
+                uid = name_to_uid[norm_name]
+                conn.execute("UPDATE users SET class_group = ? WHERE uid = ?", (class_group, uid))
+                updated += 1
+            else:
+                skipped += 1
+                
+        conn.commit()
+        conn.close()
+        flash(f'Успішно оновлено класів: {updated}. Пропущено/не знайдено в базі: {skipped}', 'success')
+        
+    except Exception as e:
+        flash(f'Помилка обробки файлу: {str(e)}', 'error')
+
+    return redirect(url_for('settings_page'))
+
+@app.route('/api/add_user', methods=['POST'])
+@requires_admin
 def add_user():
     uid = request.form.get('uid').strip().upper()
     name = request.form.get('name').strip()
@@ -1463,7 +1015,7 @@ def add_user():
     return redirect(url_for('index'))
 
 @app.route('/api/delete_user/<uid>', methods=['GET'])
-@requires_auth
+@requires_admin
 def delete_user(uid):
     conn = get_db_connection()
     conn.execute('DELETE FROM users WHERE uid = ?', (uid,))

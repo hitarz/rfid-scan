@@ -7,6 +7,7 @@ import com.smartschool.card.SmartSchoolApp
 /**
  * HCE: передає постійний card_uid на ESP32 без інтернету на телефоні.
  * ID зберігається локально після входу / створення картки.
+ * Після успішного обміну APDU — надсилає подію через HceScanEvents.
  */
 class CardEmulationService : HostApduService() {
 
@@ -18,6 +19,7 @@ class CardEmulationService : HostApduService() {
 
         if (cardUid.length != 8) return STATUS_FAILED
 
+        // SELECT AID — відповідаємо OK
         if (isSelectAid(commandApdu, SMART_SCHOOL_AID) || isSelectAid(commandApdu, NDEF_AID)) {
             return STATUS_OK
         }
@@ -27,11 +29,14 @@ class CardEmulationService : HostApduService() {
             commandApdu[0] == 0x80.toByte() &&
             commandApdu[1] == 0xCB.toByte()
         ) {
+            // Сповіщаємо UI про успішне сканування
+            HceScanEvents.emit(cardUid)
             return cardUid.toByteArray(Charsets.US_ASCII) + STATUS_OK
         }
 
         // READ BINARY (NDEF): 00 B0 ...
         if (commandApdu.size >= 2 && commandApdu[1] == 0xB0.toByte()) {
+            HceScanEvents.emit(cardUid)
             return buildNdefPayload(cardUid) + STATUS_OK
         }
 
@@ -61,9 +66,7 @@ class CardEmulationService : HostApduService() {
     }
 
     private fun isSelectAid(apdu: ByteArray, aid: ByteArray): Boolean {
-        if (apdu.size < 5 || apdu[0] != 0x00.toByte() || apdu[1] != 0xA4.toByte()) {
-            return false
-        }
+        if (apdu.size < 5 || apdu[0] != 0x00.toByte() || apdu[1] != 0xA4.toByte()) return false
         val lc = apdu[4].toInt() and 0xFF
         if (apdu.size < 5 + lc || lc != aid.size) return false
         for (i in aid.indices) {

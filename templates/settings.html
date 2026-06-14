@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="{{ t.html_lang }}" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>{{ t.page_title_settings }}</title>
+    {% raw %}
+    <script>if (localStorage.getItem('color-theme') === 'dark' || (!('color-theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) { document.documentElement.classList.add('dark'); } else { document.documentElement.classList.remove('dark') }</script>
+    {% endraw %}
+    <script src="https://cdn.tailwindcss.com"></script>
+    {% raw %}
+    <script>tailwind.config = { darkMode: 'class', theme: { extend: {} } }</script>
+    <style>
+       .glass-panel { background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.3); }
+       .dark .glass-panel { background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(255, 255, 255, 0.1); }
+    </style>
+    {% endraw %}
+</head>
+<body class="bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200 transition-colors duration-300 font-sans antialiased min-h-screen relative bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] pb-24 md:pb-12">
+    {% include "nav.html" %}
+    <div class="max-w-screen-md mx-auto pt-20 md:pt-24 px-3 md:px-4">
+        <h2 class="text-xl md:text-2xl font-bold text-slate-900 dark:text-white mb-6 flex items-center gap-2">
+            ⚙️ {{ t.settings_heading }}
+        </h2>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="mb-6 space-y-2">
+            {% for category, message in messages %}
+            <div role="alert" class="rounded-xl px-4 py-3 text-sm font-medium border
+                {% if category == 'error' %}border-rose-300 bg-rose-50 text-rose-900 dark:border-rose-700 dark:bg-rose-950/50 dark:text-rose-100
+                {% elif category == 'success' %}border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-100
+                {% else %}border-blue-200 bg-blue-50 text-blue-900 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-100{% endif %}">{{ message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+
+        <div class="glass-panel rounded-xl md:rounded-2xl shadow-lg p-6 mb-6">
+            <h3 class="text-lg font-bold mb-4 text-slate-900 dark:text-white border-b border-slate-200 dark:border-slate-700 pb-2">⏰ {{ t.settings_bell_title }}</h3>
+            <form action="/api/update_schedule" method="POST" class="flex flex-col gap-4">
+                <div>
+                    <label class="text-sm font-semibold text-slate-500 uppercase block mb-2">{{ t.settings_first_lesson_label }}</label>
+                    <input type="time" name="lesson_start" value="{{ lesson_start }}" required class="bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-900 text-lg rounded-xl px-4 py-3 dark:text-white outline-none w-full max-w-xs font-mono focus:ring-2 focus:ring-blue-500 transition-all">
+                </div>
+                <button type="submit" class="w-full max-w-xs text-white bg-blue-600 hover:bg-blue-700 font-medium rounded-xl text-sm px-5 py-3 shadow-md active:scale-95 transition-transform">
+                    {{ t.settings_save }}
+                </button>
+            </form>
+        </div>
+
+        <div class="glass-panel rounded-xl md:rounded-2xl shadow-lg p-6 mb-6">
+            <h3 class="text-lg font-bold mb-2 text-slate-900 dark:text-white border-b border-slate-200 dark:border-slate-700 pb-2">📚 {{ t.settings_promote_title }}</h3>
+            <p class="text-sm text-slate-600 dark:text-slate-400 mb-4">{{ t.settings_promote_desc }}</p>
+            <form action="/api/promote_class" method="POST" class="flex flex-col gap-4">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="text-sm font-semibold text-slate-500 uppercase block mb-2">{{ t.settings_promote_from }}</label>
+                        <select name="from_class" required class="bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white text-sm rounded-xl px-3 py-2 outline-none w-full">
+                            {% for c in classes %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-sm font-semibold text-slate-500 uppercase block mb-2">{{ t.settings_promote_to }}</label>
+                        <select name="to_class" required class="bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white text-sm rounded-xl px-3 py-2 outline-none w-full">
+                            {% for c in classes %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <label class="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-300 cursor-pointer">
+                    <input type="checkbox" name="confirm" value="1" required class="mt-1 rounded border-slate-300 dark:border-slate-600">
+                    <span>{{ t.settings_promote_confirm_label }}</span>
+                </label>
+                <button type="submit" class="w-full sm:w-auto text-white bg-amber-600 hover:bg-amber-700 font-medium rounded-xl text-sm px-5 py-3 shadow-md active:scale-95 transition-transform">
+                    {{ t.settings_promote_submit }}
+                </button>
+            </form>
+        </div>
+
+        <div class="glass-panel rounded-xl md:rounded-2xl shadow-lg p-6 mb-6">
+            <h3 class="text-lg font-bold mb-2 text-slate-900 dark:text-white border-b border-slate-200 dark:border-slate-700 pb-2">📊 Завантаження учнів з Excel</h3>
+            <p class="text-sm text-slate-600 dark:text-slate-400 mb-4">Оновіть класи учнів, завантаживши файл .xlsx. Очікувані колонки: ПІБ (або Прізвище, Ім'я) та Клас. Учні без класу в базі автоматично прив'яжуться до потрібного класу за іменем.</p>
+            <form action="/api/upload_students" method="POST" enctype="multipart/form-data" class="flex flex-col gap-4">
+                <input type="file" name="file" accept=".xlsx" required class="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 dark:file:bg-blue-900/50 dark:file:text-blue-200">
+                <button type="submit" class="w-full sm:w-auto text-white bg-green-600 hover:bg-green-700 font-medium rounded-xl text-sm px-5 py-3 shadow-md active:scale-95 transition-transform">
+                    Завантажити
+                </button>
+            </form>
+        </div>
+
+        {% if g.web_user.role == 'admin' %}
+        <div class="glass-panel rounded-xl md:rounded-2xl shadow-lg p-6 mb-6">
+            <h3 class="text-lg font-bold mb-4 text-slate-900 dark:text-white border-b border-slate-200 dark:border-slate-700 pb-2">👥 Управління веб-користувачами</h3>
+            <div class="overflow-x-auto mb-4">
+                <table class="w-full text-sm text-left">
+                    <thead class="text-xs uppercase bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
+                        <tr><th class="px-4 py-3">Логін</th><th class="px-4 py-3">Ім'я</th><th class="px-4 py-3">Роль</th><th class="px-4 py-3">Класи</th><th class="px-4 py-3">Дії</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for wu in web_users_list %}
+                        <tr class="border-b dark:border-slate-700">
+                            <td class="px-4 py-3 font-medium">{{ wu.username }}</td>
+                            <td class="px-4 py-3">{{ wu.display_name }}</td>
+                            <td class="px-4 py-3">{{ wu.role }}</td>
+                            <td class="px-4 py-3">{{ wu.classes|join(', ') }}</td>
+                            <td class="px-4 py-3">
+                                {% if wu.username != g.web_user.username %}
+                                <a href="/api/delete_web_user/{{ wu.username }}" class="text-rose-600 hover:underline">Видалити</a>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <form action="/api/add_web_user" method="POST" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-3 items-start">
+                <input type="text" name="username" placeholder="Логін" required class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm outline-none dark:bg-slate-800 dark:text-white dark:border-slate-600 w-full h-10">
+                <input type="password" name="password" placeholder="Пароль" required class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm outline-none dark:bg-slate-800 dark:text-white dark:border-slate-600 w-full h-10">
+                <select name="role" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm outline-none dark:bg-slate-800 dark:text-white dark:border-slate-600 w-full h-10">
+                    <option value="teacher">Вчитель</option>
+                    <option value="admin">Адмін</option>
+                </select>
+                <input type="text" name="display_name" placeholder="Ім'я (ПІБ)" required class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm outline-none dark:bg-slate-800 dark:text-white dark:border-slate-600 md:col-span-1 w-full h-10">
+                <div class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm outline-none dark:bg-slate-800 dark:text-white dark:border-slate-600 md:col-span-1 h-24 overflow-y-auto">
+                    <div class="text-slate-500 text-xs mb-1">Оберіть класи:</div>
+                    {% for c in classes %}
+                    <label class="flex items-center gap-2 mb-1 cursor-pointer">
+                        <input type="checkbox" name="classes" value="{{ c }}" class="rounded border-slate-300 text-blue-600 focus:ring-blue-500">
+                        <span class="text-slate-700 dark:text-slate-200">{{ c }}</span>
+                    </label>
+                    {% endfor %}
+                </div>
+                <button type="submit" class="bg-blue-600 text-white rounded-xl px-4 py-2 text-sm font-medium hover:bg-blue-700 h-10 self-start">Додати</button>
+            </form>
+        </div>
+        {% endif %}
+
+    </div>
+</body>
+</html>

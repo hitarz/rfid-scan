@@ -58,8 +58,6 @@ class MainActivity : ComponentActivity() {
                             CardScreen(
                                 state = state,
                                 onCreateCard = viewModel::createCard,
-                                onStartPass = viewModel::startPass,
-
                                 onLogout = viewModel::logout,
                             )
                         } else {

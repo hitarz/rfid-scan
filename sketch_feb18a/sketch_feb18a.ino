@@ -1,80 +1,71 @@
-#include <SPI.h>
-#include <MFRC522.h>
+// SmartSchool RFID Scanner — ESP32 + PN532 (I2C)
+// Замінює стару версію з MFRC522 (SPI)
+//
+// ЗМІНИ GPIO ПОРІВНЯНО ЗІ СТАРОЮ ВЕРСІЄЮ:
+//   LED_GREEN: GPIO21 → GPIO25  (GPIO21 тепер I2C SDA)
+//   RST_PIN:   GPIO22 → не потрібен (GPIO22 тепер I2C SCL)
+//   PN532 SDA: GPIO21  (фіксований)
+//   PN532 SCL: GPIO22  (фіксований)
+//   PN532 IRQ: GPIO15  (опціонально, рекомендовано)
+
+#include <Wire.h>
+#include <Adafruit_PN532.h>
 #include <WiFi.h>
-#include <WiFiMulti.h> // <=== ДОДАЛИ БІБЛІОТЕКУ
+#include <WiFiMulti.h>
 #include <HTTPClient.h>
 #include <ESPmDNS.h>
 #include <vector>
 #include "smart_school_nfc.h"
 
-// ================= НАСТРОЙКИ =================
-// 1. Основний Wi-Fi (Шкільний)
+// ================= НАЛАШТУВАННЯ =================
 const char* ssid_1 = "nn2";
 const char* pass_1 = "abcdefghijkl";
-
-// 2. Резервний Wi-Fi (Наприклад, роздача з телефону)
 const char* ssid_2 = "Red";
 const char* pass_2 = "12345678";
-
-// Створюємо об'єкт для мульти-підключення
-WiFiMulti wifiMulti; 
-// =============================================
+WiFiMulti wifiMulti;
 
 const char* serverUrl = "http://141.147.21.34:5000/api/scan";
-const char* token = "TOKEN_EXIT";
+const char* token     = "TOKEN_EXIT";
 const char* hmacSecret = "SmartSchool_Secret_Key_2026";
 
-#define RST_PIN 22
-#define SS_PIN  5
-#define BUZZER_PIN 27
-#define LED_GREEN_PIN 21
-#define LED_RED_PIN 17
-// =============================================
+// PN532 — I2C (SW1=ON, SW2=OFF на модулі)
+// SDA → GPIO21, SCL → GPIO22 (стандарт ESP32 Wire)
+#define PN532_IRQ_PIN  15   // -1 якщо не підключено
+#define PN532_RST_PIN  -1   // не потрібен
 
-MFRC522 mfrc522(SS_PIN, RST_PIN);
-// Створюємо структуру, яка зберігає і картку, і час її сканування
+// Індикатори (LED_GREEN переміщено з GPIO21 → GPIO25!)
+#define BUZZER_PIN     27
+#define LED_GREEN_PIN  25   // ← УВАГА: переключіть дріт з GPIO21 на GPIO25
+#define LED_RED_PIN    17
+// =================================================
+
+Adafruit_PN532 nfc(PN532_IRQ_PIN, PN532_RST_PIN);
+
 struct OfflineRecord {
   String uid;
-  unsigned long scanTime; // Тут будемо зберігати millis() на момент сканування
+  unsigned long scanTime;
 };
-
-// Змінюємо тип нашого вектора
 std::vector<OfflineRecord> offlineBuffer;
 
-unsigned long lastScanTime = 0;      // Час останнього успішного сканування
-const unsigned long COOLDOWN = 10000; // Затримка 5 секунд (5000 мілісекунд)
-String lastUID = "";                 // UID останньої відсканованої картки
+unsigned long lastScanTime = 0;
+const unsigned long COOLDOWN = 10000;
+String lastUID = "";
 
-// ---- ФУНКЦИИ ИНДИКАЦИИ ----
-
-// Короткий писк при считывании карты
+// ---- Сигнали ----
 void signalProcessing() {
-  digitalWrite(BUZZER_PIN, HIGH);
-  delay(50);
-  digitalWrite(BUZZER_PIN, LOW);
+  digitalWrite(BUZZER_PIN, HIGH); delay(50); digitalWrite(BUZZER_PIN, LOW);
 }
-
-// Успешный вход (Зеленый + Короткий писк)
 void signalSuccess() {
   digitalWrite(LED_GREEN_PIN, HIGH);
-  delay(100);
-  digitalWrite(BUZZER_PIN, HIGH);
-  delay(100);
-  digitalWrite(BUZZER_PIN, LOW);
+  digitalWrite(BUZZER_PIN, HIGH); delay(100); digitalWrite(BUZZER_PIN, LOW);
   delay(800);
   digitalWrite(LED_GREEN_PIN, LOW);
 }
-
-// Ошибка / Отказ (Красный + Длинный писк)
 void signalError() {
   digitalWrite(LED_RED_PIN, HIGH);
-  digitalWrite(BUZZER_PIN, HIGH);
-  delay(1000);
-  digitalWrite(LED_RED_PIN, LOW);
-  digitalWrite(BUZZER_PIN, LOW);
+  digitalWrite(BUZZER_PIN, HIGH); delay(1000);
+  digitalWrite(LED_RED_PIN, LOW); digitalWrite(BUZZER_PIN, LOW);
 }
-
-// Сохранено в офлайн (Зеленый + Два коротких писка)
 void signalOfflineSave() {
   digitalWrite(LED_GREEN_PIN, HIGH);
   digitalWrite(BUZZER_PIN, HIGH); delay(50); digitalWrite(BUZZER_PIN, LOW); delay(50);
@@ -83,22 +74,18 @@ void signalOfflineSave() {
   digitalWrite(LED_GREEN_PIN, LOW);
 }
 
-// ---------------------------
-// Функція для створення HMAC-SHA256 підпису
+// ---- HMAC-SHA256 підпис ----
 String generateSignature(String uid, String currentToken) {
-  String payload = uid + ":" + currentToken; // Формат: "UID:TOKEN"
+  String payload = uid + ":" + currentToken;
   byte hmacResult[32];
-
   mbedtls_md_context_t ctx;
   mbedtls_md_type_t md_type = MBEDTLS_MD_SHA256;
-
   mbedtls_md_init(&ctx);
   mbedtls_md_setup(&ctx, mbedtls_md_info_from_type(md_type), 1);
-  mbedtls_md_hmac_starts(&ctx, (const unsigned char *)hmacSecret, strlen(hmacSecret));
-  mbedtls_md_hmac_update(&ctx, (const unsigned char *)payload.c_str(), payload.length());
+  mbedtls_md_hmac_starts(&ctx, (const unsigned char*)hmacSecret, strlen(hmacSecret));
+  mbedtls_md_hmac_update(&ctx, (const unsigned char*)payload.c_str(), payload.length());
   mbedtls_md_hmac_finish(&ctx, hmacResult);
   mbedtls_md_free(&ctx);
-
   String hashStr = "";
   for (int i = 0; i < 32; i++) {
     if (hmacResult[i] < 0x10) hashStr += "0";
@@ -109,133 +96,124 @@ String generateSignature(String uid, String currentToken) {
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial);
 
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(LED_GREEN_PIN, OUTPUT);
   pinMode(LED_RED_PIN, OUTPUT);
-  
   digitalWrite(BUZZER_PIN, LOW);
   digitalWrite(LED_GREEN_PIN, LOW);
   digitalWrite(LED_RED_PIN, LOW);
 
-  SPI.begin();
-  mfrc522.PCD_Init();
-  
-Serial.print("Налаштування Wi-Fi...");
+  // Ініціалізація PN532 по I2C
+  Wire.begin(21, 22);
+  nfc.begin();
+
+  uint32_t versiondata = nfc.getFirmwareVersion();
+  if (!versiondata) {
+    Serial.println("PN532 не знайдено! Перевірте підключення та DIP-перемикачі (SW1=ON, SW2=OFF).");
+    // Мигаємо червоним поки не знайдено
+    while (true) {
+      digitalWrite(LED_RED_PIN, HIGH); delay(200);
+      digitalWrite(LED_RED_PIN, LOW);  delay(200);
+    }
+  }
+  Serial.print("PN532 знайдено! Chip: PN5");
+  Serial.println((versiondata >> 24) & 0xFF, HEX);
+  Serial.print("Firmware ver. ");
+  Serial.print((versiondata >> 16) & 0xFF, DEC);
+  Serial.print('.');
+  Serial.println((versiondata >> 8) & 0xFF, DEC);
+
+  nfc.SAMConfig();  // Дозволити зчитувати пасивні картки
+
+  // Wi-Fi (підключається у фоні)
   wifiMulti.addAP(ssid_1, pass_1);
   wifiMulti.addAP(ssid_2, pass_2);
-  
-  if (!MDNS.begin("esp32-scanner")) { 
-    Serial.println("Помилка запуску mDNS");
-  } else {
-    Serial.println("mDNS запущено успішно!");
+
+  if (!MDNS.begin("esp32-scanner")) {
+    Serial.println("Помилка mDNS");
   }
 
-  Serial.println("\nСистема готова! Wi-Fi підключиться у фоні.");
+  Serial.println("Система готова! Прикладіть картку або телефон.");
 }
+
 void loop() {
-  // Ця функція тримає зв'язок. Якщо мережа 1 впала, вона сама підключиться до мережі 2.
   bool isConnected = (wifiMulti.run() == WL_CONNECTED);
 
-  // 1. ФОНОВАЯ ВЫГРУЗКА БУФЕРА (если есть интернет и в буфере есть данные)
-  if (isConnected && !offlineBuffer.empty()) { // <=== ТУТ ТЕЖ ЗАМІНИЛИ НА isConnected
-    
-    // Беремо ПЕРШИЙ запис із черги
+  // 1. Вивантаження офлайн-буфера якщо є Wi-Fi
+  if (isConnected && !offlineBuffer.empty()) {
     OfflineRecord record = offlineBuffer.front();
-    
-    // ВИРАХОВУЄМО ЗМІЩЕННЯ ЧАСУ (скільки секунд тому було сканування)
-    // Поточний час мінус час сканування, поділити на 1000 (бо millis це мілісекунди)
     unsigned long offset_sec = (millis() - record.scanTime) / 1000;
-    
     HTTPClient http;
-    
-    // ДОДАЄМО параметр &offset=... до нашого GET-запиту
     String sig = generateSignature(record.uid, String(token));
-    String requestUrl = String(serverUrl) + "?token=" + token + "&uid=" + record.uid + "&offset=" + String(offset_sec) + "&signature=" + sig;
-    
+    String requestUrl = String(serverUrl)
+      + "?token=" + token
+      + "&uid=" + record.uid
+      + "&offset=" + String(offset_sec)
+      + "&signature=" + sig;
     http.begin(requestUrl);
     int httpCode = http.GET();
     http.end();
-
-    // ИСПРАВЛЕНИЕ БАГА: Удаляем из буфера, если сервер дал ЛЮБОЙ ответ (даже 403 Ошибка).
     if (httpCode > 0) {
-      Serial.print("Sync OK: ");
-      Serial.print(record.uid);
-      Serial.print(" (Спізнилося на ");
-      Serial.print(offset_sec);
-      Serial.println(" секунд)");
-      
+      Serial.printf("Sync OK: %s (offset %lus)\n", record.uid.c_str(), offset_sec);
       offlineBuffer.erase(offlineBuffer.begin());
     }
   }
 
-  // 2. ПОИСК НОВОЙ КАРТЫ
-  if (!mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial()) {
-    return;
+  // 2. Читання картки / телефону
+  uint8_t uid[7];
+  uint8_t uidLength;
+  if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength, 1000)) {
+    return; // Картки немає — продовжуємо цикл
   }
 
-  // Карта найдена!
   signalProcessing();
 
-  // 3. Стабільний ID з телефону (HCE) або hardware UID (RFID-картка)
-  String uidStr = smartSchoolResolveCardId(mfrc522);
-  
-  // === ДОДАНО: ЗАХИСТ ВІД ПАНІЧНОГО СКАНУВАННЯ (DEBOUNCING) ===
-  if (uidStr == lastUID && (millis() - lastScanTime < COOLDOWN)) {
-    Serial.println("Захист від спаму: ігноруємо дублікат");
-    mfrc522.PICC_HaltA(); // Зупиняємо читання цієї карти
-    return; // Виходимо, щоб не слати запит
-  }
+  // Завжди пробуємо APDU (HCE) спочатку, потім hardware UID як fallback
+  String uidStr = smartSchoolResolveCardId(nfc, uid, uidLength);
 
-  // Оновлюємо дані для наступної перевірки
+  // 3. Debounce — ігноруємо повторне сканування тієї ж картки
+  if (uidStr == lastUID && (millis() - lastScanTime < COOLDOWN)) {
+    Serial.println("Debounce: ігноруємо дублікат");
+    return;
+  }
   lastUID = uidStr;
   lastScanTime = millis();
-  // ============================================================
 
   Serial.println("Card UID: " + uidStr);
 
-  // 4. ОТПРАВКА НА СЕРВЕР ИЛИ СОХРАНЕНИЕ В БУФЕР
-  if (isConnected) { // <=== ОСЬ ЦЯ ЗМІНА
+  // 4. Відправка на сервер або збереження в буфер
+  if (isConnected) {
     HTTPClient http;
     String sig = generateSignature(uidStr, String(token));
-    String requestUrl = String(serverUrl) + "?token=" + token + "&uid=" + uidStr + "&signature=" + sig;
-    
+    String requestUrl = String(serverUrl)
+      + "?token=" + token
+      + "&uid=" + uidStr
+      + "&signature=" + sig;
     http.begin(requestUrl);
     int httpResponseCode = http.GET();
-    
     if (httpResponseCode > 0) {
-      Serial.println("HTTP Code: " + String(httpResponseCode));
-      
+      Serial.println("HTTP: " + String(httpResponseCode));
       if (httpResponseCode == 200) {
-        signalSuccess(); // Сервер пустил
+        signalSuccess();
       } else {
-        signalError();   // Сервер отказал в доступе (напр. 403)
+        signalError();
       }
     } else {
-      // Интернет есть, но сервер не отвечает (упал локальный сервер на Python)
-      Serial.println("Server unreachable, saving offline...");
+      Serial.println("Сервер недоступний, зберігаємо офлайн...");
       if (offlineBuffer.size() < 100) {
-        // === ВИПРАВЛЕНО: передаємо структуру {uid, час} ===
         offlineBuffer.push_back({uidStr, millis()});
       }
-      signalOfflineSave(); 
+      signalOfflineSave();
     }
     http.end();
-    
   } else {
-    // Wi-Fi отключился (Нет сети)
-    Serial.println("No WiFi, saving offline...");
+    Serial.println("Немає Wi-Fi, зберігаємо офлайн...");
     if (offlineBuffer.size() < 100) {
-      // === ВИПРАВЛЕНО: передаємо структуру {uid, час} ===
       offlineBuffer.push_back({uidStr, millis()});
-      signalOfflineSave(); // Пропускаем ученика, запишем потом
+      signalOfflineSave();
     } else {
-      signalError(); // Буфер переполнен
+      signalError();
     }
   }
-  
-  // 5. ОЖИДАНИЕ ПЕРЕД СЛЕДУЮЩИМ СКАНИРОВАНИЕМ
-  mfrc522.PICC_HaltA();
-  delay(1000); 
 }
