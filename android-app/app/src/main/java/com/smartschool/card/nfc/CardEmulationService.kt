@@ -19,22 +19,27 @@ class CardEmulationService : HostApduService() {
 
         if (cardUid.length != 8) return STATUS_FAILED
 
-        // SELECT AID — відповідаємо OK
-        if (isSelectAid(commandApdu, SMART_SCHOOL_AID) || isSelectAid(commandApdu, NDEF_AID)) {
-            return STATUS_OK
-        }
-
-        // GET CARD UID: 80 CB 00 00 08
-        if (commandApdu.size >= 5 &&
-            commandApdu[0] == 0x80.toByte() &&
-            commandApdu[1] == 0xCB.toByte()
-        ) {
-            // Сповіщаємо UI про успішне сканування
+        // SELECT AID — повертаємо card_uid одразу (один APDU замість двох)
+        if (isSelectAid(commandApdu, SMART_SCHOOL_AID)) {
             HceScanEvents.emit(cardUid)
             return cardUid.toByteArray(Charsets.US_ASCII) + STATUS_OK
         }
 
-        // READ BINARY (NDEF): 00 B0 ...
+        if (isSelectAid(commandApdu, NDEF_AID)) {
+            HceScanEvents.emit(cardUid)
+            return cardUid.toByteArray(Charsets.US_ASCII) + STATUS_OK
+        }
+
+        // GET CARD UID: 80 CB 00 00 08 (зворотна сумісність)
+        if (commandApdu.size >= 5 &&
+            commandApdu[0] == 0x80.toByte() &&
+            commandApdu[1] == 0xCB.toByte()
+        ) {
+            HceScanEvents.emit(cardUid)
+            return cardUid.toByteArray(Charsets.US_ASCII) + STATUS_OK
+        }
+
+        // READ BINARY (NDEF): 00 B0 ... (зворотна сумісність)
         if (commandApdu.size >= 2 && commandApdu[1] == 0xB0.toByte()) {
             HceScanEvents.emit(cardUid)
             return buildNdefPayload(cardUid) + STATUS_OK

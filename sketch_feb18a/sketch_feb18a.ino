@@ -171,6 +171,11 @@ void loop() {
 
   // Завжди пробуємо APDU (HCE) спочатку, потім hardware UID як fallback
   String uidStr = smartSchoolResolveCardId(nfc, uid, uidLength);
+  
+  // Якщо функція повернула порожній рядок (наприклад, випадковий MAC телефона), ігноруємо
+  if (uidStr == "") {
+    return;
+  }
 
   // 3. Debounce — ігноруємо повторне сканування тієї ж картки
   if (uidStr == lastUID && (millis() - lastScanTime < COOLDOWN)) {
