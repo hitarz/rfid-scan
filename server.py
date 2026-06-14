@@ -16,6 +16,10 @@ import os
 import secrets
 import uuid
 from dotenv import load_dotenv
+
+# Примусово встановлюємо часовий пояс Києва для всього скрипта
+os.environ['TZ'] = 'Europe/Kyiv'
+time.tzset()
 from werkzeug.security import generate_password_hash, check_password_hash
 import openpyxl
 
